@@ -1,3 +1,4 @@
+import csv
 import itertools
 import re
 from collections import defaultdict
@@ -7,16 +8,15 @@ from typing import Generator, Iterable, List, Optional, Type, TypedDict, Union
 from django.apps import apps
 from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
-from django.contrib.postgres.search import SearchQuery, SearchVectorField
+from django.contrib.postgres.search import SearchVectorField
 from django.core.exceptions import FieldDoesNotExist as DjangoFieldDoesNotExist
 from django.db import models
 from django.db.models import Field as DjangoModelFieldClass
-from django.db.models import JSONField, Q, QuerySet, Value
-
+from django.db.models import JSONField, QuerySet
 from loguru import logger
-from opentelemetry import trace
 
-from baserow.cachalot_patch import cachalot_enabled
+from baserow_dynamic_table.core.db import MultiFieldPrefetchQuerysetMixin, specific_iterator
+from baserow_dynamic_table.core.mixins import HierarchicalModelMixin, CreatedAndUpdatedOnMixin, OrderableMixin
 from baserow_dynamic_table.fields.exceptions import (
     FilterFieldNotFound,
     OrderByFieldNotFound,
@@ -33,123 +33,37 @@ from baserow_dynamic_table.fields.models import (
     LastModifiedField,
 )
 from baserow_dynamic_table.fields.registries import FieldType, field_type_registry
-from baserow_dynamic_table.search.handler import SearchHandler, SearchModes
 from baserow_dynamic_table.table.cache import (
     get_cached_model_field_attrs,
     set_cached_model_field_attrs,
 )
-from baserow_dynamic_table.table.constants import (
-    ROW_NEEDS_BACKGROUND_UPDATE_COLUMN_NAME,
-    TSV_FIELD_PREFIX,
-    USER_TABLE_DATABASE_NAME_PREFIX,
-)
-from baserow_dynamic_table.views.exceptions import ViewFilterTypeNotAllowedForField
-from baserow_dynamic_table.views.registries import view_filter_type_registry
-from baserow.core.db import MultiFieldPrefetchQuerysetMixin, specific_iterator
-from baserow.core.fields import AutoTrueBooleanField
-from baserow.core.jobs.mixins import (
-    JobWithUndoRedoIds,
-    JobWithUserIpAddress,
-    JobWithWebsocketId,
-)
-from baserow.core.jobs.models import Job
-from baserow.core.mixins import (
-    CreatedAndUpdatedOnMixin,
-    HierarchicalModelMixin,
-    OrderableMixin,
-    TrashableModelMixin,
-)
-from baserow.core.telemetry.utils import baserow_trace
-from baserow.core.utils import split_comma_separated_string
 
 extract_filter_sections_regex = re.compile(r"filter__(.+)__(.+)$")
 field_id_regex = re.compile(r"field_(\d+)$")
 
-tracer = trace.get_tracer(__name__)
+USER_TABLE_DATABASE_NAME_PREFIX = "database_table_"
 
 
-def get_row_needs_background_update_index(table):
-    return models.Index(
-        fields=[ROW_NEEDS_BACKGROUND_UPDATE_COLUMN_NAME],
-        name=ROW_NEEDS_BACKGROUND_UPDATE_COLUMN_NAME + f"_{table.id}_idx",
-        # Make a partial index that exactly matches how to query for rows when doing
-        # background tasks in celery.
-        condition=Q(
-            **{
-                ROW_NEEDS_BACKGROUND_UPDATE_COLUMN_NAME: Value(True),
-                "trashed": Value(False),
-            }
-        ),
+def split_comma_separated_string(comma_separated_string: str) -> List[str]:
+    r"""
+    Correctly splits a comma separated string which can contain quoted values to include
+    commas in individual items like so: 'A,"B , C",D' -> ['A', 'B , C', 'D'] or using
+    backslashes to escape double quotes like so: 'A,\"B,C' -> ['A', '"B', 'C'].
+
+    :param comma_separated_string: The string to split
+    :return: A list of split items from the provided string.
+    """
+
+    # Use python's csv handler as it knows how to handle quoted csv values etc.
+    # csv.reader returns an iterator, we use next to get the first split row back.
+    return next(
+        csv.reader(
+            [comma_separated_string], delimiter=",", quotechar='"', escapechar="\\"
+        )
     )
 
 
 class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
-    def _insert(self, objs, fields, *args, **kwargs):
-        """
-        We never want to include TSVector fields when inserting rows, we manage them
-        using UPDATE jobs in a background job. Overriding this method lets us
-        exclude them and prevent them from being included in bulk/normal inserts.
-        """
-
-        insertable_fields = []
-        if fields is not None:
-            for f in fields:
-                field_name = getattr(f, "attname", f)
-                if TSV_FIELD_PREFIX not in field_name:
-                    insertable_fields.append(f)
-        else:
-            insertable_fields = None
-        return super()._insert(objs, insertable_fields, *args, **kwargs)
-
-    def pg_search(
-        self,
-        input_search: str,
-        only_search_by_field_ids: Optional[Iterable[int]] = None,
-    ) -> QuerySet:
-        """
-        Responsible for narrowing the queryset down using Postgres
-        full-text search.
-        """
-
-        if not input_search or not input_search.strip():
-            return self
-
-        sanitized_search = SearchHandler.escape_postgres_query(input_search)
-        logger.debug(f"Raw query: {input_search}. Sanitized query: {sanitized_search}")
-
-        if len(sanitized_search) == 0:
-            return self.filter(id__in=[])
-
-        # We use "raw" as we can't use XXX, so if someone had a cell for "cheese" and
-        # searches for "chee", we need to be able to match it with "$$chee$$:*"
-        search_query = SearchQuery(
-            sanitized_search,
-            search_type="raw",
-            config=SearchHandler.search_config(),
-        )
-
-        filter_builder = FilterBuilder(filter_type=FILTER_TYPE_OR)
-
-        self._add_exact_id_search(filter_builder, input_search)
-
-        for field in self.model.get_searchable_fields():
-            if only_search_by_field_ids is None or field.id in only_search_by_field_ids:
-                filter_builder.filter(Q(**{field.tsv_db_column: search_query}))
-        return filter_builder.apply_to_queryset(self)
-
-    def _add_exact_id_search(self, filter_builder, input_search):
-        try:
-            # Search for the row ID if the `input_search` can be cast to an integer.
-            stripped_input = input_search.strip()
-            # int('0006') will produce 6 but we don't want 0006 to match row 6!
-            if not stripped_input.startswith("0"):
-                filter_builder.filter(Q(id=int(stripped_input)))
-        except ValueError:
-            pass
-
-    def count(self):
-        with cachalot_enabled():
-            return super().count()
 
     def enhance_by_fields(self):
         """
@@ -170,75 +84,6 @@ class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
         for field_type, field_objects in by_type.items():
             self = field_type.enhance_queryset_in_bulk(self, field_objects)
         return self
-
-    def search_all_fields(
-        self,
-        search: str,
-        only_search_by_field_ids: Optional[Iterable[int]] = None,
-        search_mode: Optional[SearchModes] = None,
-    ):
-        """
-        Performs a very broad search across all supported fields with the given search
-        query. If the primary key value matches then that result will be returned
-        otherwise all field types other than link row and boolean fields are currently
-        searched.
-
-        :param search: The search query.
-        :param only_search_by_field_ids: Only field ids in this iterable will be
-            filtered by the search term. Other fields not in the iterable will be
-            ignored and not be filtered.
-        :param search_mode: In `MODE_COMPAT` we will use the old search method, using
-            the LIKE operator on each column. In `MODE_FT_WITH_COUNT`  we will switch
-            to using Postgres full-text search.
-        :return: The queryset containing the search queries.
-        :rtype: QuerySet
-        """
-
-        if not search_mode:
-            search_mode = settings.DEFAULT_SEARCH_MODE
-
-        # If we are searching with Postgres full text search (whether with
-        # or without a COUNT)...
-        if search_mode == SearchModes.MODE_FT_WITH_COUNT:
-            # If `USE_PG_FULLTEXT_SEARCH` is enabled, then use
-            # the Postgres full-text search functionality instead.
-            if self.model.baserow_table.tsvectors_are_supported:
-                return self.pg_search(search, only_search_by_field_ids)
-            else:
-                # Otherwise we'll fall back to compat search.
-                return self.compat_search(search, only_search_by_field_ids)
-        elif search_mode == SearchModes.MODE_COMPAT:
-            return self.compat_search(search, only_search_by_field_ids)
-        else:
-            raise NotImplementedError(f"Unsupported search_mode {search_mode}.")
-
-    def compat_search(self, search: str, only_search_by_field_ids=None):
-        """
-        Responsible for executing our original search behaviour, using the
-        LIKE operator on each field in the table.
-        """
-
-        filter_builder = FilterBuilder(filter_type=FILTER_TYPE_OR)
-
-        self._add_exact_id_search(filter_builder, search)
-        for field_object in self.model._field_objects.values():
-            if (
-                only_search_by_field_ids is not None
-                and field_object["field"].id not in only_search_by_field_ids
-            ):
-                continue
-            field_name = field_object["name"]
-            model_field = self.model._meta.get_field(field_name)
-
-            try:
-                sub_filter = field_object["type"].contains_query(
-                    field_name, search, model_field, field_object["field"]
-                )
-                filter_builder.filter(sub_filter)
-            except Exception:  # nosec B112
-                continue
-
-        return filter_builder.apply_to_queryset(self)
 
     def _get_field_name(self, field: str) -> str:
         """
@@ -277,7 +122,7 @@ class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
         return field_id
 
     def order_by_fields_string(
-        self, order_string, user_field_names=False, only_order_by_field_ids=None
+            self, order_string, user_field_names=False, only_order_by_field_ids=None
     ):
         """
         Orders the query by the given field order string. This string is often
@@ -328,8 +173,8 @@ class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
                 field_name_or_id = self._get_field_id(order)
 
             if field_name_or_id not in field_object_dict or (
-                only_order_by_field_ids is not None
-                and field_name_or_id not in only_order_by_field_ids
+                    only_order_by_field_ids is not None
+                    and field_name_or_id not in only_order_by_field_ids
             ):
                 raise OrderByFieldNotFound(order)
 
@@ -363,11 +208,11 @@ class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
         return self.annotate(**annotations).order_by(*order_by)
 
     def filter_by_fields_object(
-        self,
-        filter_object,
-        filter_type=FILTER_TYPE_AND,
-        only_filter_by_field_ids=None,
-        user_field_names=False,
+            self,
+            filter_object,
+            filter_type=FILTER_TYPE_AND,
+            only_filter_by_field_ids=None,
+            user_field_names=False,
     ):
         """
         Filters the query by the provided filters in the filter_object. The following
@@ -445,8 +290,8 @@ class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
 
             if field_name_or_id not in fixed_field_instance_mapping.keys():
                 if field_id not in self.model._field_objects or (
-                    only_filter_by_field_ids is not None
-                    and field_id not in only_filter_by_field_ids
+                        only_filter_by_field_ids is not None
+                        and field_id not in only_filter_by_field_ids
                 ):
                     raise FilterFieldNotFound(
                         field_id, f"Field {field_id} does not exist."
@@ -482,12 +327,6 @@ class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
 class TableModelTrashAndObjectsManager(models.Manager):
     def get_queryset(self):
         qs = TableModelQuerySet(self.model, using=self._db)
-        for field in self.model.get_fields_with_search_index(include_trash=True):
-            try:
-                qs = qs.defer(field.tsv_db_column)
-            except DjangoFieldDoesNotExist:
-                # THe model has been generated without TSVs so no need to defer.
-                pass
         return qs
 
 
@@ -502,7 +341,10 @@ class FieldObject(TypedDict):
     name: str
 
 
-class GeneratedTableModel(HierarchicalModelMixin, models.Model):
+class GeneratedTableModel(
+    # HierarchicalModelMixin,
+    models.Model
+):
     """
     Mixed into Model classes which have been generated by Baserow.
     Can also be used to identify instances of generated baserow models
@@ -538,11 +380,11 @@ class GeneratedTableModel(HierarchicalModelMixin, models.Model):
             f.attname
             for f in cls._meta.fields
             if getattr(f, "requires_refresh_after_insert", False)
-            # There is a bug in Django where db_returning fields do not have their
-            # from_db_value function applied after performing and INSERT .. RETURNING
-            # Instead for now we force a refresh to ensure these fields are converted
-            # from their db representations correctly.
-            or isinstance(f, JSONField) and f.db_returning
+               # There is a bug in Django where db_returning fields do not have their
+               # from_db_value function applied after performing and INSERT .. RETURNING
+               # Instead for now we force a refresh to ensure these fields are converted
+               # from their db representations correctly.
+               or isinstance(f, JSONField) and f.db_returning
         ]
 
     @classmethod
@@ -602,8 +444,8 @@ class GeneratedTableModel(HierarchicalModelMixin, models.Model):
 
     @classmethod
     def get_searchable_fields(
-        cls,
-        include_trash: bool = False,
+            cls,
+            include_trash: bool = False,
     ) -> Generator[Field, None, None]:
         """
         Generates all searchable fields in a table. A searchable field is one where
@@ -686,32 +528,25 @@ def patch_meta_get_field(_meta):
 
 class Table(
     HierarchicalModelMixin,
-    TrashableModelMixin,
     CreatedAndUpdatedOnMixin,
     OrderableMixin,
     models.Model,
 ):
-    database = models.ForeignKey("database.Database", on_delete=models.CASCADE)
+    # database = models.ForeignKey("database.Database", on_delete=models.CASCADE)
     order = models.PositiveIntegerField()
     name = models.CharField(max_length=255)
     row_count = models.PositiveIntegerField(null=True)
     row_count_updated_at = models.DateTimeField(null=True)
     version = models.TextField(default="initial_version")
-    needs_background_update_column_added = models.BooleanField(
-        default=False,
-        help_text="Indicates whether the table has had the background_update_needed "
-        "column added.",
-    )
+
+    # needs_background_update_column_added = models.BooleanField(
+    #     default=False,
+    #     help_text="Indicates whether the table has had the background_update_needed "
+    #               "column added.",
+    # )
 
     class Meta:
         ordering = ("order",)
-
-    @property
-    def tsvectors_are_supported(self) -> bool:
-        return (
-            SearchHandler.full_text_enabled()
-            and self.needs_background_update_column_added
-        )
 
     @property
     def tsv_id_column_idx_name(self) -> str:
@@ -721,25 +556,24 @@ class Table(
         return self.database
 
     @classmethod
-    def get_last_order(cls, database):
-        queryset = Table.objects.filter(database=database)
+    def get_last_order(cls):
+        queryset = Table.objects.filter()
         return cls.get_highest_order_of_queryset(queryset) + 1
 
     def get_database_table_name(self):
         return f"{USER_TABLE_DATABASE_NAME_PREFIX}{self.id}"
 
-    @baserow_trace(tracer)
     def get_model(
-        self,
-        fields=None,
-        field_ids=None,
-        field_names=None,
-        attribute_names=False,
-        manytomany_models=None,
-        add_dependencies=True,
-        managed=False,
-        use_cache=True,
-        force_add_tsvectors: bool = False,
+            self,
+            fields=None,
+            field_ids=None,
+            field_names=None,
+            attribute_names=False,
+            manytomany_models=None,
+            add_dependencies=True,
+            managed=False,
+            use_cache=True,
+            force_add_tsvectors: bool = False,
     ) -> Type[GeneratedTableModel]:
         """
         Generates a temporary Django model based on available fields that belong to
@@ -852,12 +686,12 @@ class Table(
         }
 
         use_cache = (
-            use_cache
-            and len(fields) == 0
-            and field_ids is None
-            and add_dependencies is True
-            and attribute_names is False
-            and not settings.BASEROW_DISABLE_MODEL_CACHE
+                use_cache
+                and len(fields) == 0
+                and field_ids is None
+                and add_dependencies is True
+                and attribute_names is False
+                and not settings.BASEROW_DISABLE_MODEL_CACHE
         )
 
         if use_cache:
@@ -925,7 +759,6 @@ class Table(
             str(model_name),
             (
                 GeneratedTableModel,
-                TrashableModelMixin,
                 CreatedAndUpdatedOnMixin,
                 models.Model,
             ),
@@ -943,7 +776,7 @@ class Table(
         field_objects = field_attrs["_field_objects"]
         trashed_field_objects = field_attrs["_trashed_field_objects"]
         for field_object in itertools.chain(
-            field_objects.values(), trashed_field_objects.values()
+                field_objects.values(), trashed_field_objects.values()
         ):
             field = field_object["field"]
             if field.tsvector_column_created or force_add:
@@ -952,17 +785,6 @@ class Table(
                     GinIndex(fields=[field.tsv_db_column], name=field.tsv_index_name)
                 )
 
-    def _add_needs_background_update_column(self, field_attrs, indexes):
-        field_attrs[ROW_NEEDS_BACKGROUND_UPDATE_COLUMN_NAME] = AutoTrueBooleanField(
-            default=True,
-            help_text="Indicates if the row needs background updates run. Set to True"
-            "after a row has been changed in some way by a user or a "
-            "cascading update run by Baserow itself.",
-        )
-
-        indexes.append(get_row_needs_background_update_index(self))
-
-    @baserow_trace(tracer)
     def _after_model_generation(self, attrs, model):
         # In some situations the field can only be added once the model class has been
         # generated. So for each field we will call the after_model_generation with
@@ -978,15 +800,14 @@ class Table(
                 field_object["field"], model, field_object["name"]
             )
 
-    @baserow_trace(tracer)
     def _fetch_and_generate_field_attrs(
-        self,
-        add_dependencies,
-        attribute_names,
-        field_ids,
-        field_names,
-        fields,
-        filtered,
+            self,
+            add_dependencies,
+            attribute_names,
+            field_ids,
+            field_names,
+            fields,
+            filtered,
     ):
         field_attrs = {
             "_primary_field_id": -1,
@@ -1101,23 +922,3 @@ class Table(
     # tables.
     def get_collision_safe_order_id_idx_name(self):
         return f"tbl_order_id_{self.id}_idx"
-
-
-class DuplicateTableJob(
-    JobWithUserIpAddress, JobWithWebsocketId, JobWithUndoRedoIds, Job
-):
-    original_table = models.ForeignKey(
-        Table,
-        null=True,
-        related_name="duplicated_by_jobs",
-        on_delete=models.SET_NULL,
-        help_text="The Baserow table to duplicate.",
-    )
-
-    duplicated_table = models.OneToOneField(
-        Table,
-        null=True,
-        related_name="duplicated_from_jobs",
-        on_delete=models.SET_NULL,
-        help_text="The duplicated Baserow table.",
-    )

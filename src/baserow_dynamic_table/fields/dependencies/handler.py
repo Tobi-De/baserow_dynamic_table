@@ -1,6 +1,5 @@
 from typing import Iterable, List, Optional, Tuple
 
-from django.contrib.auth.models import AbstractUser
 from django.db.models import Q
 
 from baserow_dynamic_table.fields.dependencies.dependency_rebuilder import (
@@ -11,10 +10,6 @@ from baserow_dynamic_table.fields.dependencies.dependency_rebuilder import (
 from baserow_dynamic_table.fields.field_cache import FieldCache
 from baserow_dynamic_table.fields.models import Field, LinkRowField
 from baserow_dynamic_table.fields.registries import FieldType, field_type_registry
-from baserow.core.handler import CoreHandler
-from baserow.core.models import Workspace
-from baserow.core.types import PermissionCheck
-
 from .models import FieldDependency
 
 FieldDependants = List[Tuple[Field, FieldType, List[LinkRowField]]]
@@ -40,7 +35,7 @@ class FieldDependencyHandler:
 
     @classmethod
     def rebuild_dependencies(
-        cls, field, field_cache: FieldCache
+            cls, field, field_cache: FieldCache
     ) -> List[FieldDependency]:
         """
         Rebuilds this fields dependencies based off field_type.get_field_dependencies.
@@ -66,12 +61,12 @@ class FieldDependencyHandler:
 
     @classmethod
     def get_dependant_fields_with_type(
-        cls,
-        table_id: int,
-        field_ids: Iterable[int],
-        associated_relations_changed: bool,
-        field_cache: FieldCache,
-        starting_via_path_to_starting_table: Optional[str] = None,
+            cls,
+            table_id: int,
+            field_ids: Iterable[int],
+            associated_relations_changed: bool,
+            field_cache: FieldCache,
+            starting_via_path_to_starting_table: Optional[str] = None,
     ) -> FieldDependants:
         """
         Finds the unique dependant fields of the provided field ids efficiently with the
@@ -101,9 +96,9 @@ class FieldDependencyHandler:
             # So we want to lookup all fields which are dependant via these link row
             # m2m relationships to properly update them also.
             dependant_filter |= (
-                Q(via_id__in=field_ids)
-                | Q(via__link_row_related_field_id__in=field_ids)
-            ) & ~Q(dependant_id__in=field_ids)
+                                        Q(via_id__in=field_ids)
+                                        | Q(via__link_row_related_field_id__in=field_ids)
+                                ) & ~Q(dependant_id__in=field_ids)
         queryset = (
             FieldDependency.objects.filter(dependant_filter)
             .select_related("dependant", "dependency", "via")
@@ -124,15 +119,15 @@ class FieldDependencyHandler:
             # dependencies with via's for dependants in the same row, which don't need
             # a join, so we filter those out here.
             if field_dependency.via is not None and (
-                field_dependency.dependant.table_id != table_id
-                or (
-                    field_dependency.dependency
-                    and field_dependency.dependency.table_id == table_id
-                )
+                    field_dependency.dependant.table_id != table_id
+                    or (
+                            field_dependency.dependency
+                            and field_dependency.dependency.table_id == table_id
+                    )
             ):
                 via_path_to_starting_table = (
-                    starting_via_path_to_starting_table or []
-                ) + [field_dependency.via]
+                                                     starting_via_path_to_starting_table or []
+                                             ) + [field_dependency.via]
             else:
                 via_path_to_starting_table = starting_via_path_to_starting_table
 
@@ -167,65 +162,3 @@ class FieldDependencyHandler:
             )
             dependants.append(field_dep_tuple)
         return dependants
-
-    @classmethod
-    def rebuild_or_raise_if_user_doesnt_have_permissions_after(
-        cls,
-        workspace: Workspace,
-        user: AbstractUser,
-        field: Field,
-        field_cache: FieldCache,
-        field_operation_name: str,
-    ):
-        new_dependencies = FieldDependencyHandler.rebuild_dependencies(
-            field, field_cache
-        )
-        FieldDependencyHandler.raise_if_user_doesnt_have_operation_on_dependencies_in_other_tables(
-            workspace, user, field, new_dependencies, field_operation_name
-        )
-
-    @classmethod
-    def raise_if_user_doesnt_have_operation_on_dependencies_in_other_tables(
-        cls,
-        workspace: Workspace,
-        user: AbstractUser,
-        field: Field,
-        dependencies: List[FieldDependency],
-        field_operation_name: str,
-    ):
-        """
-        For a list of dependencies checks the provided user has the provided operation
-        on each of the dependency fields raising if they do not. It skips any
-        dependencies that point at the same table assuming the user already has rights
-        on fields in the table `field` is in.
-
-        :param workspace: The workspace.
-        :param user: The user.
-        :param field: The field.
-        :param dependencies: The dependencies.
-        :param field_operation_name: The field operation name.
-        """
-
-        perm_checks = []
-        for dep in dependencies:
-            dependency_field = dep.dependency
-            if dependency_field.table_id != field.table_id:
-                perm_checks.append(
-                    PermissionCheck(
-                        actor=user,
-                        operation_name=field_operation_name,
-                        context=dependency_field,
-                    )
-                )
-
-        changed_field_type = field_type_registry.get_by_model(field)
-        for (
-            check,
-            result,
-        ) in (
-            CoreHandler().check_multiple_permissions(perm_checks, workspace).items()
-        ):
-            if not result:
-                raise changed_field_type.get_permission_error_when_user_changes_field_to_depend_on_forbidden_field(
-                    check.actor, field, check.context
-                )

@@ -8,12 +8,12 @@ class FieldDependency(models.Model):
     """
 
     dependant = models.ForeignKey(
-        "database.Field",
+        "baserow_dynamic_table.Field",
         on_delete=models.CASCADE,
         related_name="dependencies",
     )
     dependency = models.ForeignKey(
-        "database.Field",
+        "baserow_dynamic_table.Field",
         on_delete=models.CASCADE,
         related_name="dependants",
         null=True,
@@ -21,7 +21,7 @@ class FieldDependency(models.Model):
     )
     # The link row field that the dependant depends on the dependency via.
     via = models.ForeignKey(
-        "database.LinkRowField",
+        "baserow_dynamic_table.LinkRowField",
         on_delete=models.CASCADE,
         related_name="vias",
         null=True,

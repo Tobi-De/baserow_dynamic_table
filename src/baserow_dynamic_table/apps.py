@@ -4,7 +4,7 @@ from django.db.models.signals import pre_migrate
 from baserow_dynamic_table.table.cache import clear_generated_model_cache
 
 
-class DatabaseConfig(AppConfig):
+class BaserowDynamicTableConfig(AppConfig):
     name = "baserow_dynamic_table"
 
     def prevent_generated_model_for_registering(self):
@@ -48,22 +48,20 @@ class DatabaseConfig(AppConfig):
 
         from .fields.field_types import (
             BooleanFieldType,
-            CountFieldType,
+
             CreatedOnFieldType,
             DateFieldType,
             EmailFieldType,
             FileFieldType,
-            FormulaFieldType,
-            LastModifiedFieldType,
+
             LinkRowFieldType,
             LongTextFieldType,
-            LookupFieldType,
-            MultipleCollaboratorsFieldType,
+
             MultipleSelectFieldType,
             NumberFieldType,
             PhoneNumberFieldType,
             RatingFieldType,
-            RollupFieldType,
+
             SingleSelectFieldType,
             TextFieldType,
             URLFieldType,
@@ -77,31 +75,25 @@ class DatabaseConfig(AppConfig):
         field_type_registry.register(RatingFieldType())
         field_type_registry.register(BooleanFieldType())
         field_type_registry.register(DateFieldType())
-        field_type_registry.register(LastModifiedFieldType())
+
         field_type_registry.register(CreatedOnFieldType())
         field_type_registry.register(LinkRowFieldType())
         field_type_registry.register(FileFieldType())
         field_type_registry.register(SingleSelectFieldType())
         field_type_registry.register(MultipleSelectFieldType())
         field_type_registry.register(PhoneNumberFieldType())
-        field_type_registry.register(FormulaFieldType())
-        field_type_registry.register(CountFieldType())
-        field_type_registry.register(RollupFieldType())
-        field_type_registry.register(LookupFieldType())
-        field_type_registry.register(MultipleCollaboratorsFieldType())
 
         from .fields.field_converters import (
             FileFieldConverter,
-            FormulaFieldConverter,
+
             LinkRowFieldConverter,
-            MultipleCollaboratorsFieldConverter,
+
             MultipleSelectFieldToSingleSelectFieldConverter,
             MultipleSelectFieldToTextFieldConverter,
             SingleSelectFieldToMultipleSelectFieldConverter,
             TextFieldToMultipleSelectFieldConverter,
         )
 
-        field_converter_registry.register(MultipleCollaboratorsFieldConverter())
         field_converter_registry.register(LinkRowFieldConverter())
         field_converter_registry.register(FileFieldConverter())
         field_converter_registry.register(TextFieldToMultipleSelectFieldConverter())
@@ -112,11 +104,8 @@ class DatabaseConfig(AppConfig):
         field_converter_registry.register(
             SingleSelectFieldToMultipleSelectFieldConverter()
         )
-        field_converter_registry.register(FormulaFieldConverter())
 
         pre_migrate.connect(clear_generated_model_cache_receiver, sender=self)
-
-        import baserow_dynamic_table.fields.tasks  # noqa: F401
 
 
 # noinspection PyPep8Naming

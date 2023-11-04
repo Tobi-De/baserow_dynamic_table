@@ -4,42 +4,21 @@ from typing import NewType
 from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.utils.functional import cached_property
 
-from baserow_dynamic_table.fields.mixins import (
-    DATE_FORMAT_CHOICES,
-    DATE_TIME_FORMAT_CHOICES,
-    BaseDateMixin,
-)
-from baserow_dynamic_table.formula import (
-    BASEROW_FORMULA_ARRAY_TYPE_CHOICES,
-    BASEROW_FORMULA_TYPE_CHOICES,
-    FormulaHandler,
-)
-from baserow_dynamic_table.mixins import ParentFieldTrashableModelMixin
-from baserow_dynamic_table.table.cache import invalidate_table_in_model_cache
-from baserow_dynamic_table.table.constants import (
-    LINK_ROW_THROUGH_TABLE_PREFIX,
-    MULTIPLE_COLLABORATOR_THROUGH_TABLE_PREFIX,
-    MULTIPLE_SELECT_THROUGH_TABLE_PREFIX,
-    get_tsv_vector_field_name,
-)
-from baserow.core.jobs.mixins import (
-    JobWithUndoRedoIds,
-    JobWithUserIpAddress,
-    JobWithWebsocketId,
-)
-from baserow.core.jobs.models import Job
-from baserow.core.mixins import (
+from baserow_dynamic_table.core.mixins import (
     CreatedAndUpdatedOnMixin,
     HierarchicalModelMixin,
     OrderableMixin,
     PolymorphicContentTypeMixin,
-    TrashableModelMixin,
-)
-from baserow.core.utils import remove_special_characters, to_snake_case
 
+)
+from baserow_dynamic_table.fields.mixins import (
+    BaseDateMixin,
+)
+from baserow_dynamic_table.table.cache import invalidate_table_in_model_cache
 from .fields import SerialField
+from ..core.utils import remove_special_characters, to_snake_case
+from ..table.constants import LINK_ROW_THROUGH_TABLE_PREFIX, MULTIPLE_SELECT_THROUGH_TABLE_PREFIX
 
 if typing.TYPE_CHECKING:
     from baserow_dynamic_table.fields.dependencies.handler import FieldDependants
@@ -75,7 +54,6 @@ def get_default_field_content_type():
 
 class Field(
     HierarchicalModelMixin,
-    TrashableModelMixin,
     CreatedAndUpdatedOnMixin,
     OrderableMixin,
     PolymorphicContentTypeMixin,
@@ -88,13 +66,13 @@ class Field(
     polymorphic content type to store these settings in another table.
     """
 
-    table = models.ForeignKey("database.Table", on_delete=models.CASCADE)
+    table = models.ForeignKey("baserow_dynamic_table.Table", on_delete=models.CASCADE)
     order = models.PositiveIntegerField(help_text="Lowest first.")
     name = models.CharField(max_length=255, db_index=True)
     primary = models.BooleanField(
         default=False,
         help_text="Indicates if the field is a primary field. If `true` the field "
-        "cannot be deleted and the value should represent the whole row.",
+                  "cannot be deleted and the value should represent the whole row.",
     )
     content_type = models.ForeignKey(
         ContentType,
@@ -108,13 +86,6 @@ class Field(
         through="FieldDependency",
         through_fields=("dependant", "dependency"),
         symmetrical=False,
-    )
-    tsvector_column_created = models.BooleanField(
-        default=False,
-        help_text="Indicates whether a `tsvector` has been created for this field yet. "
-        "This value will be False for fields created before the full text "
-        "search release which haven't been lazily migrated yet. Or for "
-        "users who have turned off full text search entirely.",
     )
 
     class Meta:
@@ -140,14 +111,6 @@ class Field(
         return f"field_{self.id}"
 
     @property
-    def tsv_db_column(self):
-        return get_tsv_vector_field_name(self.id)
-
-    @property
-    def tsv_index_name(self):
-        return f"tbl_tsv_{self.id}_idx"
-
-    @property
     def model_attribute_name(self):
         """
         Generates a pascal case based model attribute name based on the field name.
@@ -168,10 +131,10 @@ class Field(
         invalidate_table_in_model_cache(self.table_id)
 
     def dependant_fields_with_types(
-        self,
-        field_cache=None,
-        starting_via_path_to_starting_table=None,
-        associated_relation_changed=False,
+            self,
+            field_cache=None,
+            starting_via_path_to_starting_table=None,
+            associated_relation_changed=False,
     ) -> "FieldDependants":
         from baserow_dynamic_table.fields.dependencies.handler import (
             FieldDependencyHandler,
@@ -194,7 +157,7 @@ class Field(
 
 
 class AbstractSelectOption(
-    HierarchicalModelMixin, ParentFieldTrashableModelMixin, models.Model
+    HierarchicalModelMixin, models.Model
 ):
     value = models.CharField(max_length=255, blank=True)
     color = models.CharField(max_length=255, blank=True)
@@ -232,7 +195,7 @@ class TextField(Field):
         blank=True,
         default="",
         help_text="If set, this value is going to be added every time a new row "
-        "created.",
+                  "created.",
     )
 
 
@@ -258,8 +221,8 @@ class NumberField(Field):
         """Check if the number_decimal_places has a valid choice."""
 
         if not any(
-            self.number_decimal_places in _tuple
-            for _tuple in NUMBER_DECIMAL_PLACES_CHOICES
+                self.number_decimal_places in _tuple
+                for _tuple in NUMBER_DECIMAL_PLACES_CHOICES
         ):
             raise ValueError(f"{self.number_decimal_places} is not a valid choice.")
         super(NumberField, self).save(*args, **kwargs)
@@ -325,7 +288,7 @@ class CreatedOnField(Field, BaseDateMixin):
 class LinkRowField(Field):
     THROUGH_DATABASE_TABLE_PREFIX = LINK_ROW_THROUGH_TABLE_PREFIX
     link_row_table = models.ForeignKey(
-        "database.Table",
+        "baserow_dynamic_table.Table",
         on_delete=models.CASCADE,
         help_text="The table that the field has a relation with.",
         blank=True,
@@ -397,304 +360,6 @@ class MultipleSelectField(Field):
 
 class PhoneNumberField(Field):
     pass
-
-
-class FormulaField(Field):
-    formula = models.TextField()
-    internal_formula = models.TextField()
-    version = models.IntegerField()
-    requires_refresh_after_insert = models.BooleanField()
-    old_formula_with_field_by_id = models.TextField(null=True, blank=True)
-    error = models.TextField(null=True, blank=True)
-    nullable = models.BooleanField()
-
-    formula_type = models.TextField(
-        choices=BASEROW_FORMULA_TYPE_CHOICES,
-        default="invalid",
-    )
-    array_formula_type = models.TextField(
-        choices=BASEROW_FORMULA_ARRAY_TYPE_CHOICES,
-        default=None,
-        null=True,
-    )
-    number_decimal_places = models.IntegerField(
-        choices=NUMBER_DECIMAL_PLACES_CHOICES,
-        default=None,
-        null=True,
-        help_text="The amount of digits allowed after the point.",
-    )
-    date_format = models.CharField(
-        choices=DATE_FORMAT_CHOICES,
-        default=None,
-        max_length=32,
-        help_text="EU (20/02/2020), US (02/20/2020) or ISO (2020-02-20)",
-        null=True,
-    )
-    date_include_time = models.BooleanField(
-        default=None,
-        help_text="Indicates if the field also includes a time.",
-        null=True,
-    )
-    date_time_format = models.CharField(
-        choices=DATE_TIME_FORMAT_CHOICES,
-        default=None,
-        null=True,
-        max_length=32,
-        help_text="24 (14:30) or 12 (02:30 PM)",
-    )
-    date_show_tzinfo = models.BooleanField(
-        default=None,
-        null=True,
-        help_text="Indicates if the time zone should be shown.",
-    )
-    date_force_timezone = models.CharField(
-        max_length=255,
-        null=True,
-        help_text="Force a timezone for the field overriding user profile settings.",
-    )
-    needs_periodic_update = models.BooleanField(
-        default=False,
-        help_text="Indicates if the field needs to be periodically updated.",
-    )
-
-    @cached_property
-    def cached_untyped_expression(self):
-        return FormulaHandler.raw_formula_to_untyped_expression(self.formula)
-
-    @cached_property
-    def cached_typed_internal_expression(self):
-        return FormulaHandler.get_typed_internal_expression_from_field(self)
-
-    @cached_property
-    def cached_formula_type(self):
-        return FormulaHandler.get_formula_type_from_field(self)
-
-    def clear_cached_properties(self):
-        try:
-            # noinspection PyPropertyAccess
-            del self.cached_untyped_expression
-        except AttributeError:
-            # It has not been cached yet so nothing to deleted.
-            pass
-        try:
-            # noinspection PyPropertyAccess
-            del self.cached_formula_type
-        except AttributeError:
-            # It has not been cached yet so nothing to deleted.
-            pass
-
-    def recalculate_internal_fields(self, raise_if_invalid=False, field_cache=None):
-        self.clear_cached_properties()
-        expression = FormulaHandler.recalculate_formula_field_cached_properties(
-            self, field_cache
-        )
-        expression_type = expression.expression_type
-        # Update the cached properties
-        setattr(self, "cached_typed_internal_expression", expression)
-        setattr(self, "cached_formula_type", expression_type)
-
-        if raise_if_invalid:
-            expression_type.raise_if_invalid()
-
-    def mark_as_invalid_and_save(self, error: str):
-        from baserow_dynamic_table.formula import BaserowFormulaInvalidType
-
-        try:
-            # noinspection PyPropertyAccess
-            del self.cached_typed_internal_expression
-        except AttributeError:
-            # It has not been cached yet so nothing to deleted.
-            pass
-
-        invalid_type = BaserowFormulaInvalidType(error)
-        invalid_type.persist_onto_formula_field(self)
-        setattr(self, "cached_formula_type", invalid_type)
-        self.save(recalculate=False, raise_if_invalid=False)
-
-    def save(self, *args, **kwargs):
-        recalculate = kwargs.pop("recalculate", not self.trashed)
-        field_cache = kwargs.pop("field_cache", None)
-        raise_if_invalid = kwargs.pop("raise_if_invalid", False)
-
-        if recalculate:
-            self.recalculate_internal_fields(
-                field_cache=field_cache, raise_if_invalid=raise_if_invalid
-            )
-        super().save(*args, **kwargs)
-
-    def refresh_from_db(self, *args, **kwargs) -> None:
-        super().refresh_from_db(*args, **kwargs)
-        self.clear_cached_properties()
-
-    def __str__(self):
-        return (
-            "FormulaField(\n"
-            + f"formula={self.formula},\n"
-            + f"internal_formula={self.internal_formula},\n"
-            + f"formula_type={self.formula_type},\n"
-            + f"error={self.error},\n"
-            + ")"
-        )
-
-
-class CountField(FormulaField):
-    through_field = models.ForeignKey(
-        Field,
-        on_delete=models.SET_NULL,
-        related_name="count_fields_used_by",
-        null=True,
-        blank=True,
-    )
-
-    def save(self, *args, **kwargs):
-        from baserow_dynamic_table.formula.ast.function_defs import BaserowCount
-        from baserow_dynamic_table.formula.ast.tree import BaserowFieldReference
-
-        field_reference = BaserowFieldReference(
-            getattr(self.through_field, "name", ""), None, None
-        )
-        self.formula = f"{BaserowCount.type}({field_reference})"
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return (
-            "CountField(\n"
-            + f"formula={self.formula},\n"
-            + f"through_field_id={self.through_field_id},\n"
-            + f"error={self.error},\n"
-            + ")"
-        )
-
-
-class RollupField(FormulaField):
-    through_field = models.ForeignKey(
-        Field,
-        on_delete=models.SET_NULL,
-        related_name="rollup_fields_used_by",
-        null=True,
-        blank=True,
-    )
-    target_field = models.ForeignKey(
-        Field,
-        on_delete=models.SET_NULL,
-        related_name="targeting_rollup_fields",
-        null=True,
-        blank=True,
-    )
-    rollup_function = models.CharField(
-        max_length=64,
-        blank=True,
-        help_text="The rollup formula function that must be applied.",
-    )
-
-    def save(self, *args, **kwargs):
-        from baserow_dynamic_table.formula.ast.tree import BaserowFieldReference
-        from baserow_dynamic_table.formula.registries import (
-            formula_function_registry,
-        )
-
-        formula_function = formula_function_registry.get(self.rollup_function)
-        field_reference = BaserowFieldReference(
-            getattr(self.through_field, "name", ""),
-            getattr(self.target_field, "name", ""),
-            None,
-        )
-        self.formula = f"{formula_function.type}({field_reference})"
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return (
-            "RollupField(\n"
-            + f"through_field={getattr(self.through_field, 'name', '')},\n"
-            + f"target_field={getattr(self.target_field, 'name', '')},\n"
-            + f"rollup_function={self.rollup_function},\n"
-            + f"error={self.error},\n"
-            + ")"
-        )
-
-
-class LookupField(FormulaField):
-    through_field = models.ForeignKey(
-        Field,
-        on_delete=models.SET_NULL,
-        related_name="lookup_fields_used_by",
-        null=True,
-        blank=True,
-    )
-    target_field = models.ForeignKey(
-        Field,
-        on_delete=models.SET_NULL,
-        related_name="targeting_lookup_fields",
-        null=True,
-        blank=True,
-    )
-    through_field_name = models.CharField(max_length=255)
-    target_field_name = models.CharField(max_length=255)
-
-    def save(self, *args, **kwargs):
-        from baserow_dynamic_table.formula.ast.tree import BaserowFieldReference
-
-        expression = str(
-            BaserowFieldReference(self.through_field_name, self.target_field_name, None)
-        )
-        self.formula = expression
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return (
-            "LookupField(\n"
-            + f"through_field={self.through_field_name},\n"
-            + f"target_field={self.target_field_name},\n"
-            + f"array_formula_type={self.array_formula_type},\n"
-            + f"error={self.error},\n"
-            + ")"
-        )
-
-
-class MultipleCollaboratorsField(Field):
-    THROUGH_DATABASE_TABLE_PREFIX = MULTIPLE_COLLABORATOR_THROUGH_TABLE_PREFIX
-
-    notify_user_when_added = models.BooleanField(
-        default=True,
-        help_text=(
-            "Indicates if the user should be notified when they are added as a "
-            "collaborator."
-        ),
-    )
-
-    @property
-    def through_table_name(self):
-        """
-        Generating a unique through table name based on the relation id.
-
-        :return: The table name of the through model.
-        :rtype: string
-        """
-
-        return f"{self.THROUGH_DATABASE_TABLE_PREFIX}{self.id}"
-
-
-class DuplicateFieldJob(
-    JobWithUserIpAddress, JobWithWebsocketId, JobWithUndoRedoIds, Job
-):
-    original_field = models.ForeignKey(
-        Field,
-        null=True,
-        related_name="duplicated_by_jobs",
-        on_delete=models.SET_NULL,
-        help_text="The Baserow field to duplicate.",
-    )
-    duplicate_data = models.BooleanField(
-        default=False,
-        help_text="Indicates if the data of the field should be duplicated.",
-    )
-    duplicated_field = models.OneToOneField(
-        Field,
-        null=True,
-        related_name="duplicated_from_jobs",
-        on_delete=models.SET_NULL,
-        help_text="The duplicated Baserow field.",
-    )
 
 
 SpecificFieldForUpdate = NewType("SpecificFieldForUpdate", Field)

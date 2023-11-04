@@ -26,13 +26,7 @@ from .exceptions import (
     TableDoesNotExist,
     TableNotInDatabase,
 )
-from .models import Table, get_row_needs_background_update_index
-from .operations import (
-    DeleteDatabaseTableOperationType,
-    DuplicateDatabaseTableOperationType,
-    UpdateDatabaseTableOperationType,
-)
-from .signals import table_created, table_deleted, table_updated, tables_reordered
+from .models import Table
 
 BATCH_SIZE = 1024
 
@@ -59,9 +53,6 @@ class TableHandler:
         try:
             table = base_queryset.select_related("database__workspace").get(id=table_id)
         except Table.DoesNotExist:
-            raise TableDoesNotExist(f"The table with id {table_id} does not exist.")
-
-        if TrashHandler.item_has_a_trashed_parent(table):
             raise TableDoesNotExist(f"The table with id {table_id} does not exist.")
 
         return table
@@ -108,12 +99,10 @@ class TableHandler:
     def create_table(
             self,
             user: AbstractUser,
-            database: Database,
             name: str,
             data: Optional[List[List[Any]]] = None,
             first_row_header: bool = True,
             fill_example: bool = False,
-            progress: Optional[Progress] = None,
     ):
         """
         Creates a new table from optionally provided data. If no data is specified,
@@ -135,16 +124,6 @@ class TableHandler:
         :return: The created table and the error report.
         """
 
-        CoreHandler().check_permissions(
-            user,
-            CreateTableDatabaseTableOperationType.type,
-            workspace=database.workspace,
-            context=database,
-        )
-
-        if progress:
-            progress.increment(0, state=TABLE_CREATION)
-
         if data is not None:
             (
                 fields,
@@ -159,20 +138,17 @@ class TableHandler:
                 else:
                     fields, data = self.get_minimal_table_field_and_data()
 
-        table = self.create_table_and_fields(user, database, name, fields)
+        table = self.create_table_and_fields(user, name, fields)
 
         _, error_report = RowHandler().import_rows(
             user, table, data, progress=progress, send_realtime_update=False
         )
-
-        table_created.send(self, table=table, user=user)
 
         return table, error_report
 
     def create_table_and_fields(
             self,
             user: AbstractUser,
-            database: Database,
             name: str,
             fields: List[Tuple[str, str, Dict[str, Any]]],
     ) -> Table:
@@ -189,9 +165,8 @@ class TableHandler:
             field_options of the created view.
         """
 
-        last_order = Table.get_last_order(database)
+        last_order = Table.get_last_order()
         table = Table.objects.create(
-            database=database,
             order=last_order,
             name=name,
             needs_background_update_column_added=True,
@@ -215,23 +190,6 @@ class TableHandler:
             )
             if field_options:
                 field_options_dict[fields[index].id] = field_options
-
-        # Creates a default view
-        view_handler = ViewHandler()
-
-        with translation.override(user.profile.language):
-            view = view_handler.create_view(
-                user, table, GridViewType.type, name=_("Grid")
-            )
-
-        # Fix field_options if any
-        if field_options_dict:
-            view_handler.update_field_options(
-                user=user,
-                view=view,
-                field_options=field_options_dict,
-                fields=fields,
-            )
 
         # Create the table schema in the database.
         with safe_django_schema_editor() as schema_editor:
@@ -363,21 +321,12 @@ class TableHandler:
         if not isinstance(table, Table):
             raise ValueError("The table is not an instance of Table")
 
-        CoreHandler().check_permissions(
-            user,
-            UpdateDatabaseTableOperationType.type,
-            workspace=table.database.workspace,
-            context=table,
-        )
-
         table.name = name
         table.save()
 
-        table_updated.send(self, table=table, user=user)
-
         return table
 
-    def order_tables(self, user: AbstractUser, database: Database, order: List[int]):
+    def order_tables(self, user: AbstractUser, order: List[int]):
         """
         Updates the order of the tables in the given database. The order of the views
         that are not in the `order` parameter set to `0`.
@@ -389,22 +338,9 @@ class TableHandler:
             to the database.
         """
 
-        CoreHandler().check_permissions(
-            user,
-            OrderTablesDatabaseTableOperationType.type,
-            workspace=database.workspace,
-            context=database,
-        )
+        all_tables = Table.objects.all()
 
-        all_tables = Table.objects.filter(database_id=database.id)
-
-        user_tables = CoreHandler().filter_queryset(
-            user,
-            OrderTablesDatabaseTableOperationType.type,
-            all_tables,
-            workspace=database.workspace,
-            context=database,
-        )
+        user_tables = all_tables.filter(user=user)
 
         table_ids = user_tables.values_list("id", flat=True)
 
@@ -412,8 +348,7 @@ class TableHandler:
             if table_id not in table_ids:
                 raise TableNotInDatabase(table_id)
 
-        full_order = Table.order_objects(all_tables, order)
-        tables_reordered.send(self, database=database, order=full_order, user=user)
+        Table.order_objects(all_tables, order)
 
     def find_unused_table_name(self, database: Database, proposed_name: str) -> str:
         """

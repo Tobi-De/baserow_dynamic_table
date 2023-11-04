@@ -1,13 +1,15 @@
 from django.core.exceptions import ValidationError
 
-from baserow.core.exceptions import (
-    InstanceTypeAlreadyRegistered,
-    InstanceTypeDoesNotExist,
-    LockConflict,
-)
+
+class InstanceTypeAlreadyRegistered(Exception):
+    pass
 
 
 class FieldTypeAlreadyRegistered(InstanceTypeAlreadyRegistered):
+    pass
+
+
+class InstanceTypeDoesNotExist(Exception):
     pass
 
 
@@ -163,7 +165,7 @@ class AllProvidedMultipleSelectValuesMustBeSelectOption(ValidationError):
             f"The provided select option values {self.values} are not valid select options."
             if len(self.values) > 1
             else f"The provided select option value '{self.values[0]}' is not a valid select "
-            "option."
+                 "option."
         )
         super().__init__(
             msg,
@@ -233,6 +235,10 @@ class InvalidLookupTargetField(Exception):
 
 class IncompatibleFieldTypeForUniqueValues(Exception):
     """Raised when the unique values of an incompatible field are requested."""
+
+
+class LockConflict(Exception):
+    pass
 
 
 class FailedToLockFieldDueToConflict(LockConflict):

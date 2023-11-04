@@ -150,6 +150,10 @@ class MultipleSelectManyToManyField(models.ManyToManyField):
             )
 
 
+class BaserowExpression:
+    pass
+
+
 class BaserowExpressionField(models.Field):
     """
     A Custom Django field which is always set to the value of the provided Baserow

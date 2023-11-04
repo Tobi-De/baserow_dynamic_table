@@ -5,23 +5,17 @@ from django.db.models import Expression, Q, Value
 
 from baserow_dynamic_table.fields.field_cache import FieldCache
 from baserow_dynamic_table.fields.models import Field, LinkRowField
-from baserow_dynamic_table.fields.signals import field_updated
-from baserow_dynamic_table.search.handler import SearchHandler
-from baserow_dynamic_table.table.constants import (
-    ROW_NEEDS_BACKGROUND_UPDATE_COLUMN_NAME,
-)
 from baserow_dynamic_table.table.models import Table
-from baserow_dynamic_table.table.signals import table_updated
 
 StartingRowIdsType = Optional[List[int]]
 
 
 class PathBasedUpdateStatementCollector:
     def __init__(
-        self,
-        table: Table,
-        connection_here: Optional[LinkRowField],
-        connection_is_broken: bool,
+            self,
+            table: Table,
+            connection_here: Optional[LinkRowField],
+            connection_is_broken: bool,
     ):
         """
         Collects updates statements for a particular table and then can execute them
@@ -40,29 +34,29 @@ class PathBasedUpdateStatementCollector:
         self.connection_is_broken = connection_is_broken
 
     def add_update_statement(
-        self,
-        field: Field,
-        update_statement: Expression,
-        path_from_starting_table: Optional[List[LinkRowField]] = None,
+            self,
+            field: Field,
+            update_statement: Expression,
+            path_from_starting_table: Optional[List[LinkRowField]] = None,
     ):
         self._add_update_statement_or_mark_as_changed_for_field(
             field, update_statement, path_from_starting_table
         )
 
     def mark_field_as_changed(
-        self,
-        field: Field,
-        path_from_starting_table: Optional[List[LinkRowField]] = None,
+            self,
+            field: Field,
+            path_from_starting_table: Optional[List[LinkRowField]] = None,
     ):
         self._add_update_statement_or_mark_as_changed_for_field(
             field, None, path_from_starting_table
         )
 
     def _add_update_statement_or_mark_as_changed_for_field(
-        self,
-        field: Field,
-        update_statement: Optional[Expression],
-        path_from_starting_table: Optional[List[LinkRowField]] = None,
+            self,
+            field: Field,
+            update_statement: Optional[Expression],
+            path_from_starting_table: Optional[List[LinkRowField]] = None,
     ):
         if not path_from_starting_table:
             if self.table != field.table:
@@ -115,11 +109,11 @@ class PathBasedUpdateStatementCollector:
         return collector
 
     def execute_all(
-        self,
-        field_cache: FieldCache,
-        starting_row_ids: StartingRowIdsType = None,
-        path_to_starting_table: StartingRowIdsType = None,
-        deleted_m2m_rels_per_link_field: Optional[Dict[int, Set[int]]] = None,
+            self,
+            field_cache: FieldCache,
+            starting_row_ids: StartingRowIdsType = None,
+            path_to_starting_table: StartingRowIdsType = None,
+            deleted_m2m_rels_per_link_field: Optional[Dict[int, Set[int]]] = None,
     ):
         path_to_starting_table = path_to_starting_table or []
         if self.connection_here is not None:
@@ -140,11 +134,11 @@ class PathBasedUpdateStatementCollector:
             )
 
     def _execute_pending_update_statements(
-        self,
-        field_cache: FieldCache,
-        path_to_starting_table: List[LinkRowField],
-        starting_row_ids: StartingRowIdsType,
-        deleted_m2m_rels_per_link_field: Optional[Dict[int, Set[int]]],
+            self,
+            field_cache: FieldCache,
+            path_to_starting_table: List[LinkRowField],
+            starting_row_ids: StartingRowIdsType,
+            deleted_m2m_rels_per_link_field: Optional[Dict[int, Set[int]]],
     ):
         model = field_cache.get_model(self.table)
         qs = model.objects_and_trash
@@ -155,7 +149,7 @@ class PathBasedUpdateStatementCollector:
                 path_to_starting_table_id_column = "id"
             else:
                 path_to_starting_table_id_column = (
-                    "__".join([p.db_column for p in path_to_starting_table]) + "__id"
+                        "__".join([p.db_column for p in path_to_starting_table]) + "__id"
                 )
             path_to_starting_table_id_column += "__in"
 
@@ -174,9 +168,9 @@ class PathBasedUpdateStatementCollector:
         qs.update(**self.update_statements)
 
     def _include_rows_connected_to_deleted_m2m_relationships(
-        self,
-        deleted_m2m_rels_per_link_field: Dict[int, Set[int]],
-        path_to_starting_table: List[LinkRowField],
+            self,
+            deleted_m2m_rels_per_link_field: Dict[int, Set[int]],
+            path_to_starting_table: List[LinkRowField],
     ):
         """
         If a row or batch of rows have been updated breaking their link row connections
@@ -231,10 +225,10 @@ class FieldUpdateCollector:
     """
 
     def __init__(
-        self,
-        starting_table: Table,
-        starting_row_ids: StartingRowIdsType = None,
-        deleted_m2m_rels_per_link_field: Optional[Dict[int, Set[int]]] = None,
+            self,
+            starting_table: Table,
+            starting_row_ids: StartingRowIdsType = None,
+            deleted_m2m_rels_per_link_field: Optional[Dict[int, Set[int]]] = None,
     ):
         """
 
@@ -257,10 +251,10 @@ class FieldUpdateCollector:
         )
 
     def add_field_with_pending_update_statement(
-        self,
-        field: Field,
-        update_statement: Expression,
-        via_path_to_starting_table: Optional[List[LinkRowField]] = None,
+            self,
+            field: Field,
+            update_statement: Expression,
+            via_path_to_starting_table: Optional[List[LinkRowField]] = None,
     ):
         """
         Stores the provided field as an updated one to send in field updated signals
@@ -286,10 +280,10 @@ class FieldUpdateCollector:
         )
 
     def add_field_which_has_changed(
-        self,
-        field: Field,
-        via_path_to_starting_table: Optional[List[LinkRowField]] = None,
-        send_field_updated_signal: bool = True,
+            self,
+            field: Field,
+            via_path_to_starting_table: Optional[List[LinkRowField]] = None,
+            send_field_updated_signal: bool = True,
     ):
         """
         Stores the provided field as an updated one to send in field updated signals
@@ -318,7 +312,7 @@ class FieldUpdateCollector:
         )
 
     def apply_updates_and_get_updated_fields(
-        self, field_cache: FieldCache, skip_search_updates=False
+            self, field_cache: FieldCache, skip_search_updates=False
     ) -> List[Field]:
         """
         Triggers all update statements to be executed in the correct order in as few
@@ -359,8 +353,8 @@ class FieldUpdateCollector:
         """
 
         for (
-            field,
-            related_fields,
+                field,
+                related_fields,
         ) in self._get_updated_fields_to_send_signals_for_per_table():
             if field.table != self._starting_table:
                 field_updated.send(
@@ -375,7 +369,7 @@ class FieldUpdateCollector:
             table_updated.send(self, table=table, user=None, force_table_refresh=True)
 
     def _get_updated_fields_to_send_signals_for_per_table(
-        self,
+            self,
     ) -> List[Tuple[Field, List[Field]]]:
         result = []
         for fields_dict in self._updated_fields_per_table.values():

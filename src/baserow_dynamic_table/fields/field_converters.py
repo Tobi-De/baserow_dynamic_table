@@ -1,19 +1,15 @@
 from dataclasses import dataclass
 
 from django.db import models, transaction
-
 from psycopg2 import sql
 
 from baserow_dynamic_table.db.schema import (
     lenient_schema_editor,
     safe_django_schema_editor,
 )
-
 from .models import (
     FileField,
-    FormulaField,
     LinkRowField,
-    MultipleCollaboratorsField,
     MultipleSelectField,
     SelectOption,
     SingleSelectField,
@@ -23,15 +19,15 @@ from .registries import FieldConverter, field_type_registry
 
 class RecreateFieldConverter(FieldConverter):
     def alter_field(
-        self,
-        from_field,
-        to_field,
-        from_model,
-        to_model,
-        from_model_field,
-        to_model_field,
-        user,
-        connection,
+            self,
+            from_field,
+            to_field,
+            from_model,
+            to_model,
+            from_model_field,
+            to_model_field,
+            user,
+            connection,
     ):
         """
         Does the field alteration by removing the old field and creating the new field.
@@ -44,46 +40,26 @@ class RecreateFieldConverter(FieldConverter):
             schema_editor.add_field(to_model, to_model_field)
 
 
-class FormulaFieldConverter(RecreateFieldConverter):
-    type = "formula"
-
-    def is_applicable(self, from_model, from_field, to_field):
-        return isinstance(to_field, FormulaField)
-
-
 class LinkRowFieldConverter(RecreateFieldConverter):
     type = "link_row"
 
     def is_applicable(self, from_model, from_field, to_field):
         return (
-            (
-                isinstance(from_field, LinkRowField)
-                and not isinstance(to_field, LinkRowField)
-            )
-            or (
-                not isinstance(from_field, LinkRowField)
-                and isinstance(to_field, LinkRowField)
-            )
-            or (
-                # If both fields are LinkRowFields and neither the linked table nor the
-                # multiple setting has changed.
-                isinstance(from_field, LinkRowField)
-                and isinstance(to_field, LinkRowField)
-                and from_field.link_row_table_id != to_field.link_row_table_id
-            )
-        )
-
-
-class MultipleCollaboratorsFieldConverter(RecreateFieldConverter):
-    type = "multiple_collaborators"
-
-    def is_applicable(self, from_model, from_field, to_field):
-        return (
-            isinstance(to_field, MultipleCollaboratorsField)
-            and not isinstance(from_field, MultipleCollaboratorsField)
-        ) or (
-            isinstance(from_field, MultipleCollaboratorsField)
-            and not isinstance(to_field, MultipleCollaboratorsField)
+                (
+                        isinstance(from_field, LinkRowField)
+                        and not isinstance(to_field, LinkRowField)
+                )
+                or (
+                        not isinstance(from_field, LinkRowField)
+                        and isinstance(to_field, LinkRowField)
+                )
+                or (
+                    # If both fields are LinkRowFields and neither the linked table nor the
+                    # multiple setting has changed.
+                        isinstance(from_field, LinkRowField)
+                        and isinstance(to_field, LinkRowField)
+                        and from_field.link_row_table_id != to_field.link_row_table_id
+                )
         )
 
 
@@ -92,7 +68,7 @@ class FileFieldConverter(RecreateFieldConverter):
 
     def is_applicable(self, from_model, from_field, to_field):
         return (
-            isinstance(from_field, FileField) and not isinstance(to_field, FileField)
+                isinstance(from_field, FileField) and not isinstance(to_field, FileField)
         ) or (not isinstance(from_field, FileField) and isinstance(to_field, FileField))
 
 
@@ -126,11 +102,11 @@ class MultipleSelectConversionBase(MultipleSelectConversionConfig):
     """
 
     def __init__(
-        self,
-        from_field,
-        to_field,
-        from_model_field,
-        to_model_field,
+            self,
+            from_field,
+            to_field,
+            from_model_field,
+            to_model_field,
     ):
         if isinstance(to_field, MultipleSelectField):
             self.multiple_select_field = to_field
@@ -149,9 +125,9 @@ class MultipleSelectConversionBase(MultipleSelectConversionConfig):
         ].get_attname_column()[1]
 
     def insert_into_many_relationship(
-        self,
-        connection,
-        subselect: sql.SQL,
+            self,
+            connection,
+            subselect: sql.SQL,
     ):
         """
         Helper method in order to insert values into the many to many through table.
@@ -175,7 +151,7 @@ class MultipleSelectConversionBase(MultipleSelectConversionConfig):
 
     @staticmethod
     def update_column_with_values(
-        connection, values: sql.SQL, table: str, db_column: str
+            connection, values: sql.SQL, table: str, db_column: str
     ):
         """
         Helper method in order to update a table column with a list of values. This is
@@ -241,21 +217,21 @@ class TextFieldToMultipleSelectFieldConverter(FieldConverter):
 
     def is_applicable(self, from_model, from_field, to_field):
         return (
-            not isinstance(from_field, MultipleSelectField)
-            and not isinstance(from_field, SingleSelectField)
-            and isinstance(to_field, MultipleSelectField)
+                not isinstance(from_field, MultipleSelectField)
+                and not isinstance(from_field, SingleSelectField)
+                and isinstance(to_field, MultipleSelectField)
         )
 
     def alter_field(
-        self,
-        from_field,
-        to_field,
-        from_model,
-        to_model,
-        from_model_field,
-        to_model_field,
-        user,
-        connection,
+            self,
+            from_field,
+            to_field,
+            from_model,
+            to_model,
+            from_model_field,
+            to_model_field,
+            user,
+            connection,
     ):
         from_field_type = field_type_registry.get_by_model(from_field)
         helper = MultipleSelectConversionBase(
@@ -268,10 +244,10 @@ class TextFieldToMultipleSelectFieldConverter(FieldConverter):
         # The lenient_schema_editor is needed so that field type specific conversions
         # will be respected when converting to a MultipleSelectField.
         with lenient_schema_editor(
-            from_field_type.get_alter_column_prepare_old_value(
-                connection, from_field, to_field
-            ),
-            None,
+                from_field_type.get_alter_column_prepare_old_value(
+                    connection, from_field, to_field
+                ),
+                None,
         ) as schema_editor:
             # Convert the existing column to a temporary text field.
             tmp_model_field, _ = helper.add_temporary_text_field_to_model(
@@ -359,21 +335,21 @@ class MultipleSelectFieldToTextFieldConverter(FieldConverter):
 
     def is_applicable(self, from_model, from_field, to_field):
         return (
-            isinstance(from_field, MultipleSelectField)
-            and not isinstance(to_field, MultipleSelectField)
-            and not isinstance(to_field, SingleSelectField)
+                isinstance(from_field, MultipleSelectField)
+                and not isinstance(to_field, MultipleSelectField)
+                and not isinstance(to_field, SingleSelectField)
         )
 
     def alter_field(
-        self,
-        from_field,
-        to_field,
-        from_model,
-        to_model,
-        from_model_field,
-        to_model_field,
-        user,
-        connection,
+            self,
+            from_field,
+            to_field,
+            from_model,
+            to_model,
+            from_model_field,
+            to_model_field,
+            user,
+            connection,
     ):
         to_field_type = field_type_registry.get_by_model(to_field)
         helper = MultipleSelectConversionBase(
@@ -383,10 +359,10 @@ class MultipleSelectFieldToTextFieldConverter(FieldConverter):
             to_model_field,
         )
         with lenient_schema_editor(
-            None,
-            to_field_type.get_alter_column_prepare_new_value(
-                connection, from_field, to_field
-            ),
+                None,
+                to_field_type.get_alter_column_prepare_new_value(
+                    connection, from_field, to_field
+                ),
         ) as schema_editor:
             tmp_model_field, _ = helper.add_temporary_text_field_to_model(
                 from_model, from_field.db_column
@@ -450,15 +426,15 @@ class MultipleSelectFieldToSingleSelectFieldConverter(FieldConverter):
         )
 
     def alter_field(
-        self,
-        from_field,
-        to_field,
-        from_model,
-        to_model,
-        from_model_field,
-        to_model_field,
-        user,
-        connection,
+            self,
+            from_field,
+            to_field,
+            from_model,
+            to_model,
+            from_model_field,
+            to_model_field,
+            user,
+            connection,
     ):
         helper = MultipleSelectConversionBase(
             from_field,
@@ -531,15 +507,15 @@ class SingleSelectFieldToMultipleSelectFieldConverter(FieldConverter):
         )
 
     def alter_field(
-        self,
-        from_field,
-        to_field,
-        from_model,
-        to_model,
-        from_model_field,
-        to_model_field,
-        user,
-        connection,
+            self,
+            from_field,
+            to_field,
+            from_model,
+            to_model,
+            from_model_field,
+            to_model_field,
+            user,
+            connection,
     ):
         helper = MultipleSelectConversionBase(
             from_field,

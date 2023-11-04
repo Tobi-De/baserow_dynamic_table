@@ -1,13 +1,11 @@
 from django.db.transaction import Atomic
-
-from cachalot.api import cachalot_disabled
 from psycopg2 import sql
 
-from baserow.core.db import IsolationLevel, transaction_atomic
+from baserow_dynamic_table.core.db import IsolationLevel, transaction_atomic
 
 
 def read_repeatable_single_database_atomic_transaction(
-    database_id: int,
+        database_id: int,
 ) -> Atomic:
     """
     If you want to safely read the contents of a Baserow database inside of a single
@@ -44,18 +42,18 @@ def read_repeatable_single_database_atomic_transaction(
 """
     )
     first_statement_args = [sql.Literal(database_id)]
-    with cachalot_disabled():
-        return transaction_atomic(
-            isolation_level=IsolationLevel.REPEATABLE_READ,
-            first_sql_to_run_in_transaction_with_args=(
-                first_statement,
-                first_statement_args,
-            ),
-        )
+
+    return transaction_atomic(
+        isolation_level=IsolationLevel.REPEATABLE_READ,
+        first_sql_to_run_in_transaction_with_args=(
+            first_statement,
+            first_statement_args,
+        ),
+    )
 
 
 def read_committed_single_table_transaction(
-    table_id: int,
+        table_id: int,
 ) -> Atomic:
     """
     If you want to safely read the contents of a Baserow table inside of a single
@@ -99,7 +97,7 @@ def read_committed_single_table_transaction(
 
 
 def read_repeatable_read_single_table_transaction(
-    table_id: int,
+        table_id: int,
 ) -> Atomic:
     """
     If you want to safely read the contents of a Baserow table inside of a single
@@ -136,11 +134,10 @@ def read_repeatable_read_single_table_transaction(
 """
     )
     first_statement_args = [sql.Literal(table_id)]
-    with cachalot_disabled():
-        return transaction_atomic(
-            isolation_level=IsolationLevel.REPEATABLE_READ,
-            first_sql_to_run_in_transaction_with_args=(
-                first_statement,
-                first_statement_args,
-            ),
-        )
+    return transaction_atomic(
+        isolation_level=IsolationLevel.REPEATABLE_READ,
+        first_sql_to_run_in_transaction_with_args=(
+            first_statement,
+            first_statement_args,
+        ),
+    )

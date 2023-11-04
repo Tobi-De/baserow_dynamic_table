@@ -2,17 +2,12 @@ from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-
 from faker import Faker
 
 from baserow_dynamic_table.fields.models import Field, SelectOption
 from baserow_dynamic_table.fields.registries import field_type_registry
-from baserow_dynamic_table.models import Database
-from baserow_dynamic_table.rows.handler import RowHandler
 from baserow_dynamic_table.table.handler import TableHandler
 from baserow_dynamic_table.table.models import Table
-from baserow.core.handler import CoreHandler
-from baserow.core.user_files.handler import UserFileHandler
 
 User = get_user_model()
 
@@ -23,21 +18,12 @@ def load_test_data():
     print("Add basic data...")
 
     user = User.objects.get(email="admin@baserow.io")
-    workspace = user.workspaceuser_set.get(workspace__name="Acme Corp").workspace
 
     try:
-        database = Database.objects.get(name="Back to local", trashed=False)
-    except Database.DoesNotExist:
-        database = CoreHandler().create_application(
-            user, workspace, "database", name="Back to local"
-        )
-
-    try:
-        products_table = Table.objects.get(name="Products", database=database)
+        products_table = Table.objects.get(name="Products")
     except Table.DoesNotExist:
         products_table = TableHandler().create_table_and_fields(
             user,
-            database,
             name="Products",
             fields=[
                 ("Name", "text", {}),
@@ -54,15 +40,15 @@ def load_test_data():
         select_by_name = {}
 
         for order, option in enumerate(
-            [
-                {"color": "dark-green", "value": "Fruit & Vegetable"},
-                {"color": "light-orange", "value": "Dairy"},
-                {"color": "dark-red", "value": "Meat"},
-                {"color": "blue", "value": "Fish"},
-                {"color": "dark-gray", "value": "Bakery"},
-                {"color": "dark-blue", "value": "Beverage"},
-                {"color": "light-green", "value": "Grocery"},
-            ]
+                [
+                    {"color": "dark-green", "value": "Fruit & Vegetable"},
+                    {"color": "light-orange", "value": "Dairy"},
+                    {"color": "dark-red", "value": "Meat"},
+                    {"color": "blue", "value": "Fish"},
+                    {"color": "dark-gray", "value": "Bakery"},
+                    {"color": "dark-blue", "value": "Beverage"},
+                    {"color": "light-green", "value": "Grocery"},
+                ]
         ):
             select_option = SelectOption.objects.create(
                 field=select_field,
@@ -121,14 +107,14 @@ def load_test_data():
 
         select_field = Field.objects.get(table=suppliers_table, name="Certification")
         for order, option in enumerate(
-            [
-                {"color": "dark-green", "value": "Organic"},
-                {"color": "light-orange", "value": "Fair trade"},
-                {"color": "light-green", "value": "Natural"},
-                {"color": "light-blue", "value": "Animal protection"},
-                {"color": "blue", "value": "Eco"},
-                {"color": "dark-blue", "value": "Equitable"},
-            ]
+                [
+                    {"color": "dark-green", "value": "Organic"},
+                    {"color": "light-orange", "value": "Fair trade"},
+                    {"color": "light-green", "value": "Natural"},
+                    {"color": "light-blue", "value": "Animal protection"},
+                    {"color": "blue", "value": "Eco"},
+                    {"color": "dark-blue", "value": "Equitable"},
+                ]
         ):
             select_option = SelectOption.objects.create(
                 field=select_field,

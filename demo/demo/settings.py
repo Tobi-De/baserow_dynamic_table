@@ -118,3 +118,19 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+TESTS = True
+GENERATED_MODEL_CACHE_NAME = "generated-models"
+REDIS_URL = "redis://127.0.0.1:6379"
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+        "KEY_PREFIX": "baserow-default-cache",
+    },
+    GENERATED_MODEL_CACHE_NAME: {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+        "KEY_PREFIX": f"baserow-{GENERATED_MODEL_CACHE_NAME}-cache",
+    },
+}
