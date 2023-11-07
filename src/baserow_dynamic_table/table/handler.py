@@ -596,25 +596,3 @@ class TableHandler:
                 )["row_count__sum"]
                 or 0
         )
-
-    def create_needs_background_update_field(self, table: "Table") -> None:
-        """
-        Responsible for creating the `ROW_NEEDS_BACKGROUND_UPDATES_RUN_COLUMN_NAME` and
-        fields on the `Table`.
-        """
-
-        if table.needs_background_update_column_added:
-            return
-
-        # Prepare a fresh model we can use to create the columns.
-        table.needs_background_update_column_added = True
-        model = table.get_model()
-
-        with safe_django_schema_editor(atomic=False) as schema_editor:
-            needs_background_update_field = model._meta.get_field(
-                ROW_NEEDS_BACKGROUND_UPDATE_COLUMN_NAME
-            )
-            schema_editor.add_field(model, needs_background_update_field)
-            schema_editor.add_index(model, get_row_needs_background_update_index(table))
-
-        table.save(update_fields=("needs_background_update_column_added",))

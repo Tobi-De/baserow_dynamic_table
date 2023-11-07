@@ -25,7 +25,9 @@ build-backend = "hatchling.build"
 
 [tool.rye]
 managed = true
-dev-dependencies = []
+dev-dependencies = [
+    "dj-notebook>=0.6.1",
+]
 
 [tool.hatch.metadata]
 allow-direct-references = true
