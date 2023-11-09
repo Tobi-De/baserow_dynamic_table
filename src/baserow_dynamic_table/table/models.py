@@ -15,8 +15,15 @@ from django.db.models import Field as DjangoModelFieldClass
 from django.db.models import JSONField, QuerySet
 from loguru import logger
 
-from baserow_dynamic_table.core.db import MultiFieldPrefetchQuerysetMixin, specific_iterator
-from baserow_dynamic_table.core.mixins import HierarchicalModelMixin, CreatedAndUpdatedOnMixin, OrderableMixin
+from baserow_dynamic_table.core.db import (
+    MultiFieldPrefetchQuerysetMixin,
+    specific_iterator,
+)
+from baserow_dynamic_table.core.mixins import (
+    HierarchicalModelMixin,
+    CreatedAndUpdatedOnMixin,
+    OrderableMixin,
+)
 from baserow_dynamic_table.fields.exceptions import (
     FilterFieldNotFound,
     OrderByFieldNotFound,
@@ -64,7 +71,6 @@ def split_comma_separated_string(comma_separated_string: str) -> List[str]:
 
 
 class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
-
     def enhance_by_fields(self):
         """
         Enhances the queryset based on the `enhance_queryset_in_bulk` for each unique
@@ -122,7 +128,7 @@ class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
         return field_id
 
     def order_by_fields_string(
-            self, order_string, user_field_names=False, only_order_by_field_ids=None
+        self, order_string, user_field_names=False, only_order_by_field_ids=None
     ):
         """
         Orders the query by the given field order string. This string is often
@@ -173,8 +179,8 @@ class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
                 field_name_or_id = self._get_field_id(order)
 
             if field_name_or_id not in field_object_dict or (
-                    only_order_by_field_ids is not None
-                    and field_name_or_id not in only_order_by_field_ids
+                only_order_by_field_ids is not None
+                and field_name_or_id not in only_order_by_field_ids
             ):
                 raise OrderByFieldNotFound(order)
 
@@ -208,11 +214,11 @@ class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
         return self.annotate(**annotations).order_by(*order_by)
 
     def filter_by_fields_object(
-            self,
-            filter_object,
-            filter_type=FILTER_TYPE_AND,
-            only_filter_by_field_ids=None,
-            user_field_names=False,
+        self,
+        filter_object,
+        filter_type=FILTER_TYPE_AND,
+        only_filter_by_field_ids=None,
+        user_field_names=False,
     ):
         """
         Filters the query by the provided filters in the filter_object. The following
@@ -290,8 +296,8 @@ class TableModelQuerySet(MultiFieldPrefetchQuerysetMixin, models.QuerySet):
 
             if field_name_or_id not in fixed_field_instance_mapping.keys():
                 if field_id not in self.model._field_objects or (
-                        only_filter_by_field_ids is not None
-                        and field_id not in only_filter_by_field_ids
+                    only_filter_by_field_ids is not None
+                    and field_id not in only_filter_by_field_ids
                 ):
                     raise FilterFieldNotFound(
                         field_id, f"Field {field_id} does not exist."
@@ -332,7 +338,8 @@ class TableModelTrashAndObjectsManager(models.Manager):
 
 class TableModelManager(TableModelTrashAndObjectsManager):
     def get_queryset(self):
-        return super().get_queryset().filter(trashed=False)
+        # return super().get_queryset().filter(trashed=False)
+        return super().get_queryset().filter()
 
 
 class FieldObject(TypedDict):
@@ -380,11 +387,11 @@ class GeneratedTableModel(
             f.attname
             for f in cls._meta.fields
             if getattr(f, "requires_refresh_after_insert", False)
-               # There is a bug in Django where db_returning fields do not have their
-               # from_db_value function applied after performing and INSERT .. RETURNING
-               # Instead for now we force a refresh to ensure these fields are converted
-               # from their db representations correctly.
-               or isinstance(f, JSONField) and f.db_returning
+            # There is a bug in Django where db_returning fields do not have their
+            # from_db_value function applied after performing and INSERT .. RETURNING
+            # Instead for now we force a refresh to ensure these fields are converted
+            # from their db representations correctly.
+            or isinstance(f, JSONField) and f.db_returning
         ]
 
     @classmethod
@@ -444,8 +451,8 @@ class GeneratedTableModel(
 
     @classmethod
     def get_searchable_fields(
-            cls,
-            include_trash: bool = False,
+        cls,
+        include_trash: bool = False,
     ) -> Generator[Field, None, None]:
         """
         Generates all searchable fields in a table. A searchable field is one where
@@ -564,16 +571,16 @@ class Table(
         return f"{USER_TABLE_DATABASE_NAME_PREFIX}{self.id}"
 
     def get_model(
-            self,
-            fields=None,
-            field_ids=None,
-            field_names=None,
-            attribute_names=False,
-            manytomany_models=None,
-            add_dependencies=True,
-            managed=False,
-            use_cache=True,
-            force_add_tsvectors: bool = False,
+        self,
+        fields=None,
+        field_ids=None,
+        field_names=None,
+        attribute_names=False,
+        manytomany_models=None,
+        add_dependencies=True,
+        managed=False,
+        use_cache=True,
+        force_add_tsvectors: bool = False,
     ) -> Type[GeneratedTableModel]:
         """
         Generates a temporary Django model based on available fields that belong to
@@ -686,12 +693,12 @@ class Table(
         }
 
         use_cache = (
-                use_cache
-                and len(fields) == 0
-                and field_ids is None
-                and add_dependencies is True
-                and attribute_names is False
-                and not settings.BASEROW_DISABLE_MODEL_CACHE
+            use_cache
+            and len(fields) == 0
+            and field_ids is None
+            and add_dependencies is True
+            and attribute_names is False
+            and not settings.BASEROW_DISABLE_MODEL_CACHE
         )
 
         if use_cache:
@@ -745,12 +752,12 @@ class Table(
             default=1,
         )
 
-        self._add_search_tsvector_fields_to_model(
-            field_attrs, indexes, force_add_tsvectors
-        )
+        # self._add_search_tsvector_fields_to_model(
+        #     field_attrs, indexes, force_add_tsvectors
+        # )
 
-        if self.needs_background_update_column_added:
-            self._add_needs_background_update_column(field_attrs, indexes)
+        # if self.needs_background_update_column_added:
+        #     self._add_needs_background_update_column(field_attrs, indexes)
 
         attrs.update(**field_attrs)
 
@@ -776,7 +783,7 @@ class Table(
         field_objects = field_attrs["_field_objects"]
         trashed_field_objects = field_attrs["_trashed_field_objects"]
         for field_object in itertools.chain(
-                field_objects.values(), trashed_field_objects.values()
+            field_objects.values(), trashed_field_objects.values()
         ):
             field = field_object["field"]
             if field.tsvector_column_created or force_add:
@@ -801,13 +808,13 @@ class Table(
             )
 
     def _fetch_and_generate_field_attrs(
-            self,
-            add_dependencies,
-            attribute_names,
-            field_ids,
-            field_names,
-            fields,
-            filtered,
+        self,
+        add_dependencies,
+        attribute_names,
+        field_ids,
+        field_names,
+        fields,
+        filtered,
     ):
         field_attrs = {
             "_primary_field_id": -1,
@@ -824,7 +831,8 @@ class Table(
         # trashed field attributes then model.objects.create will fail as the
         # trashed columns will be given null values by django triggering not null
         # constraints in the database.
-        fields_query = self.field_set(manager="objects_and_trash").all()
+        # fields_query = self.field_set(manager="objects_and_trash").all()
+        fields_query = self.field_set(manager="objects").all()
 
         # If the field ids are provided we must only fetch the fields of which the
         # ids are in that list.
@@ -858,7 +866,8 @@ class Table(
         # field to the attribute list in order for the model to work.
         while len(fields) > 0:
             field = fields.pop(0)
-            trashed = field.trashed
+            # trashed = field.trashed
+            trashed = False
             field = field.specific
             field_type = field_type_registry.get_by_model(field)
             field_name = field.db_column

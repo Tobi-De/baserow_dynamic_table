@@ -10,7 +10,6 @@ from baserow_dynamic_table.core.mixins import (
     HierarchicalModelMixin,
     OrderableMixin,
     PolymorphicContentTypeMixin,
-
 )
 from baserow_dynamic_table.fields.mixins import (
     BaseDateMixin,
@@ -18,7 +17,10 @@ from baserow_dynamic_table.fields.mixins import (
 from baserow_dynamic_table.table.cache import invalidate_table_in_model_cache
 from .fields import SerialField
 from ..core.utils import remove_special_characters, to_snake_case
-from ..table.constants import LINK_ROW_THROUGH_TABLE_PREFIX, MULTIPLE_SELECT_THROUGH_TABLE_PREFIX
+from ..table.constants import (
+    LINK_ROW_THROUGH_TABLE_PREFIX,
+    MULTIPLE_SELECT_THROUGH_TABLE_PREFIX,
+)
 
 if typing.TYPE_CHECKING:
     from baserow_dynamic_table.fields.dependencies.handler import FieldDependants
@@ -72,7 +74,7 @@ class Field(
     primary = models.BooleanField(
         default=False,
         help_text="Indicates if the field is a primary field. If `true` the field "
-                  "cannot be deleted and the value should represent the whole row.",
+        "cannot be deleted and the value should represent the whole row.",
     )
     content_type = models.ForeignKey(
         ContentType,
@@ -131,10 +133,10 @@ class Field(
         invalidate_table_in_model_cache(self.table_id)
 
     def dependant_fields_with_types(
-            self,
-            field_cache=None,
-            starting_via_path_to_starting_table=None,
-            associated_relation_changed=False,
+        self,
+        field_cache=None,
+        starting_via_path_to_starting_table=None,
+        associated_relation_changed=False,
     ) -> "FieldDependants":
         from baserow_dynamic_table.fields.dependencies.handler import (
             FieldDependencyHandler,
@@ -156,9 +158,7 @@ class Field(
         return save
 
 
-class AbstractSelectOption(
-    HierarchicalModelMixin, models.Model
-):
+class AbstractSelectOption(HierarchicalModelMixin, models.Model):
     value = models.CharField(max_length=255, blank=True)
     color = models.CharField(max_length=255, blank=True)
     order = models.PositiveIntegerField()
@@ -195,7 +195,7 @@ class TextField(Field):
         blank=True,
         default="",
         help_text="If set, this value is going to be added every time a new row "
-                  "created.",
+        "created.",
     )
 
 
@@ -221,8 +221,8 @@ class NumberField(Field):
         """Check if the number_decimal_places has a valid choice."""
 
         if not any(
-                self.number_decimal_places in _tuple
-                for _tuple in NUMBER_DECIMAL_PLACES_CHOICES
+            self.number_decimal_places in _tuple
+            for _tuple in NUMBER_DECIMAL_PLACES_CHOICES
         ):
             raise ValueError(f"{self.number_decimal_places} is not a valid choice.")
         super(NumberField, self).save(*args, **kwargs)
@@ -300,7 +300,8 @@ class LinkRowField(Field):
         null=True,
         blank=True,
     )
-    link_row_relation_id = SerialField(null=True, unique=False)
+    # link_row_relation_id = SerialField(null=True, unique=False)
+    link_row_relation_id = SerialField(unique=False)
 
     @property
     def through_table_name(self):

@@ -86,7 +86,7 @@ class TableHandler:
             else:
                 raise e
 
-    def get_tables_order(self, database: Database) -> List[int]:
+    def get_tables_order(self) -> List[int]:
         """
         Returns the tables in the database ordered by the order field.
 
@@ -94,7 +94,7 @@ class TableHandler:
         :return: A list containing the order of the tables in the database.
         """
 
-        return [table.id for table in database.table_set.order_by("order")]
+        return [table.id for table in Table.objects.order_by("order")]
 
     def create_table(
             self,
@@ -132,11 +132,10 @@ class TableHandler:
                 data, first_row_header=first_row_header
             )
         else:
-            with translation.override(user.profile.language):
-                if fill_example:
-                    fields, data = self.get_example_table_field_and_data()
-                else:
-                    fields, data = self.get_minimal_table_field_and_data()
+            if fill_example:
+                fields, data = self.get_example_table_field_and_data()
+            else:
+                fields, data = self.get_minimal_table_field_and_data()
 
         table = self.create_table_and_fields(user, name, fields)
 
@@ -168,8 +167,7 @@ class TableHandler:
         last_order = Table.get_last_order()
         table = Table.objects.create(
             order=last_order,
-            name=name,
-            needs_background_update_column_added=True,
+            name=name
         )
 
         # Let's create the fields before creating the model so that the whole
@@ -185,7 +183,6 @@ class TableHandler:
                 order=index,
                 primary=index == 0,
                 name=name,
-                tsvector_column_created=table.tsvectors_are_supported,
                 **field_config,
             )
             if field_options:
@@ -350,7 +347,7 @@ class TableHandler:
 
         Table.order_objects(all_tables, order)
 
-    def find_unused_table_name(self, database: Database, proposed_name: str) -> str:
+    def find_unused_table_name(self, proposed_name: str) -> str:
         """
         Finds an unused name for a table in a database.
 
@@ -359,7 +356,7 @@ class TableHandler:
         :return: A unique name to use.
         """
 
-        existing_tables_names = list(database.table_set.values_list("name", flat=True))
+        existing_tables_names = list(Table.objects.values_list("name", flat=True))
         return find_unused_name([proposed_name], existing_tables_names, max_length=255)
 
     def _create_related_link_fields_in_existing_tables_to_import(
@@ -411,94 +408,6 @@ class TableHandler:
             external_fields.append((link_row_table, serialized_related_link_row_field))
 
         return external_fields
-
-    def duplicate_table(
-            self,
-            user: AbstractUser,
-            table: Table,
-            progress_builder: Optional[ChildProgressBuilder] = None,
-    ) -> Table:
-        """
-        Duplicates an existing table instance.
-
-        :param user: The user on whose behalf the table is duplicated.
-        :param table: The table instance that needs to be duplicated.
-        :param progress: A progress object that can be used to report progress.
-        :raises ValueError: When the provided table is not an instance of Table.
-        :return: The duplicated table instance.
-        """
-
-        if not isinstance(table, Table):
-            raise ValueError("The table is not an instance of Table")
-
-        start_progress, export_progress, import_progress = 10, 30, 60
-        progress = ChildProgressBuilder.build(progress_builder, child_total=100)
-        progress.increment(by=start_progress)
-
-        database = table.database
-
-        CoreHandler().check_permissions(
-            user,
-            DuplicateDatabaseTableOperationType.type,
-            workspace=database.workspace,
-            context=table,
-        )
-
-        database_type = application_type_registry.get_by_model(database)
-
-        config = ImportExportConfig(
-            include_permission_data=True, reduce_disk_space_usage=False
-        )
-
-        serialized_tables = database_type.export_tables_serialized([table], config)
-
-        # Set a unique name for the table to import back as a new one.
-        exported_table = serialized_tables[0]
-        exported_table["name"] = self.find_unused_table_name(database, table.name)
-        exported_table["order"] = Table.get_last_order(database)
-
-        # It can happen that a field, filter, etc has a reference to a field in
-        # another table. This can result in an error because that field id is not in
-        # the field mapping. Therefore, we're fetching all the related field ids in
-        # the table and add those to the mapping. The key and value is the same
-        # because those field ids haven't changed.
-        all_table_dependency_field_ids = FieldDependency.objects.filter(
-            Q(dependant__table_id=table.id) & ~Q(dependency__table_id=table.id)
-        ).values_list("dependency_id", flat=True)
-        all_table_dependency_field_ids = {
-            field_id: field_id for field_id in all_table_dependency_field_ids
-        }
-        id_mapping: Dict[str, Any] = {
-            "database_tables": {},
-            "database_fields": all_table_dependency_field_ids,
-            # We have to create the `database_field_select_options` because that's
-            # otherwise not created later on.
-            "database_field_select_options": {},
-        }
-
-        link_fields_to_import_to_existing_tables = (
-            self._create_related_link_fields_in_existing_tables_to_import(
-                exported_table, id_mapping
-            )
-        )
-        progress.increment(by=export_progress)
-
-        imported_tables = database_type.import_tables_serialized(
-            database,
-            [exported_table],
-            id_mapping,
-            config,
-            external_table_fields_to_import=link_fields_to_import_to_existing_tables,
-            progress_builder=progress.create_child_builder(
-                represents_progress=import_progress
-            ),
-        )
-
-        new_table_clone = imported_tables[0]
-
-        table_created.send(self, table=new_table_clone, user=user)
-
-        return new_table_clone
 
     def delete_table_by_id(self, user: AbstractUser, table_id: int):
         """

@@ -12,8 +12,13 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 
 from pathlib import Path
 
+import environ
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+env = environ.Env()
+environ.Env.read_env(BASE_DIR / ".env")
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.1/howto/deployment/checklist/
@@ -35,7 +40,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-
+    "django_extensions",
     "core",
     "baserow_dynamic_table",
 ]
@@ -74,11 +79,9 @@ WSGI_APPLICATION = "demo.wsgi.application"
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases
 
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+    "default": env.db("DATABASE_URL")
 }
+DATABASES["default"]["ATOMIC_REQUESTS"] = True
 
 # Password validation
 # https://docs.djangoproject.com/en/4.1/ref/settings/#auth-password-validators
@@ -119,6 +122,7 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+BASEROW_DISABLE_MODEL_CACHE = True
 TESTS = True
 GENERATED_MODEL_CACHE_NAME = "generated-models"
 REDIS_URL = "redis://127.0.0.1:6379"
