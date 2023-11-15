@@ -716,8 +716,8 @@ class Table(
         return self.database
 
     @classmethod
-    def get_last_order(cls, database):
-        queryset = Table.objects.filter(database=database)
+    def get_last_order(cls):
+        queryset = Table.objects.all()
         return cls.get_highest_order_of_queryset(queryset) + 1
 
     def get_database_table_name(self):
@@ -851,7 +851,7 @@ class Table(
             and field_ids is None
             and add_dependencies is True
             and attribute_names is False
-            and not settings.baserow_dynamic_table_DISABLE_MODEL_CACHE
+            and not settings.BASEROW_DISABLE_MODEL_CACHE
         )
 
         if use_cache:

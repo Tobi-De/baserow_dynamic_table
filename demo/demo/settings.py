@@ -120,7 +120,8 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-baserow_dynamic_table_dynamic_table_dynamic_table_DISABLE_MODEL_CACHE = True
+BASEROW_DISABLE_MODEL_CACHE = True
+USE_PG_FULLTEXT_SEARCH = False
 TESTS = True
 GENERATED_MODEL_CACHE_NAME = "generated-models"
 REDIS_URL = "redis://127.0.0.1:6379"
@@ -128,11 +129,11 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_URL,
-        "KEY_PREFIX": "baserow_dynamic_table_dynamic_table_dynamic_table-default-cache",
+        "KEY_PREFIX": "baserow-default-cache",
     },
     GENERATED_MODEL_CACHE_NAME: {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_URL,
-        "KEY_PREFIX": f"baserow_dynamic_table_dynamic_table_dynamic_table-{GENERATED_MODEL_CACHE_NAME}-cache",
+        "KEY_PREFIX": f"baserow-{GENERATED_MODEL_CACHE_NAME}-cache",
     },
 }

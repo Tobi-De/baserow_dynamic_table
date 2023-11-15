@@ -139,8 +139,8 @@ class MultipleSelectManyToManyField(models.ManyToManyField):
     def contribute_to_related_class(self, cls, related):
         super().contribute_to_related_class(cls, related)
         if (
-                not self.remote_field.is_hidden()
-                and not related.related_model._meta.swapped
+            not self.remote_field.is_hidden()
+            and not related.related_model._meta.swapped
         ):
             setattr(
                 cls,
@@ -168,14 +168,13 @@ class SerialField(models.Field):
         return "serial"
 
     def pre_save(self, model_instance, add):
-        if add and not getattr(model_instance, self.name):
-            sequence_name = f"{model_instance._meta.db_table}_{self.name}_seq"
-            return RawSQL(  # nosec
-                f"nextval('{sequence_name}'::regclass)",
-                (),
-            )
-        else:
+        if not add or getattr(model_instance, self.name):
             return super().pre_save(model_instance, add)
+        sequence_name = f"{model_instance._meta.db_table}_{self.name}_seq"
+        return RawSQL(  # nosec
+            f"nextval('{sequence_name}'::regclass)",
+            (),
+        )
 
 
 class DurationFieldUsingPostgresFormatting(models.DurationField):

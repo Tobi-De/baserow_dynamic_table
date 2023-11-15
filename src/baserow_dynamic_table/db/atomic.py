@@ -1,13 +1,14 @@
+from django.db.transaction import Atomic
+from psycopg2 import sql
+
 from baserow_dynamic_table.core.db import (
     IsolationLevel,
     transaction_atomic,
 )
-from django.db.transaction import Atomic
-from psycopg2 import sql
 
 
 def read_repeatable_single_database_atomic_transaction(
-        database_id: int,
+    database_id: int,
 ) -> Atomic:
     """
     If you want to safely read the contents of a baserow_dynamic_table_dynamic_table_dynamic_table database inside of a single
@@ -23,7 +24,7 @@ def read_repeatable_single_database_atomic_transaction(
        and table metadata rows in this first SELECT statement FOR KEY SHARE. This means
        once the transaction has obtained this lock it can proceed safely without
        having to worry about fields being updated during the length of the transaction.
-       We need to lock these rows as otherwise baserow_dynamic_table_dynamic_table_dynamic_table's various endpoints can
+       We need to lock these rows as otherwise baserow's various endpoints can
        execute ALTER TABLE and DROP TABLE statements which are not MVCC safe and will
        break the snapshot obtained by REPEATABLE READ, see
        https://www.postgresql.org/docs/current/mvcc-caveats.html for more info.
@@ -55,7 +56,7 @@ def read_repeatable_single_database_atomic_transaction(
 
 
 def read_committed_single_table_transaction(
-        table_id: int,
+    table_id: int,
 ) -> Atomic:
     """
     If you want to safely read the contents of a baserow_dynamic_table_dynamic_table_dynamic_table table inside of a single
@@ -99,7 +100,7 @@ def read_committed_single_table_transaction(
 
 
 def read_repeatable_read_single_table_transaction(
-        table_id: int,
+    table_id: int,
 ) -> Atomic:
     """
     If you want to safely read the contents of a baserow_dynamic_table_dynamic_table_dynamic_table table inside of a single

@@ -1,5 +1,9 @@
 from io import BytesIO
 
+from django.contrib.auth import get_user_model
+from django.db import transaction
+from faker import Faker
+
 from baserow_dynamic_table.fields.models import (
     Field,
     SelectOption,
@@ -9,9 +13,6 @@ from baserow_dynamic_table.fields.registries import (
 )
 from baserow_dynamic_table.table.handler import TableHandler
 from baserow_dynamic_table.table.models import Table
-from django.contrib.auth import get_user_model
-from django.db import transaction
-from faker import Faker
 
 User = get_user_model()
 
@@ -21,7 +22,7 @@ def load_test_data():
     fake = Faker()
     print("Add basic data...")
 
-    user = User.objects.get(email="admin@baserow_dynamic_table_dynamic_table_dynamic_table.io")
+    user = User.objects.get(email="admin@baserow.io")
 
     try:
         products_table = Table.objects.get(name="Products")
@@ -44,15 +45,15 @@ def load_test_data():
         select_by_name = {}
 
         for order, option in enumerate(
-                [
-                    {"color": "dark-green", "value": "Fruit & Vegetable"},
-                    {"color": "light-orange", "value": "Dairy"},
-                    {"color": "dark-red", "value": "Meat"},
-                    {"color": "blue", "value": "Fish"},
-                    {"color": "dark-gray", "value": "Bakery"},
-                    {"color": "dark-blue", "value": "Beverage"},
-                    {"color": "light-green", "value": "Grocery"},
-                ]
+            [
+                {"color": "dark-green", "value": "Fruit & Vegetable"},
+                {"color": "light-orange", "value": "Dairy"},
+                {"color": "dark-red", "value": "Meat"},
+                {"color": "blue", "value": "Fish"},
+                {"color": "dark-gray", "value": "Bakery"},
+                {"color": "dark-blue", "value": "Beverage"},
+                {"color": "light-green", "value": "Grocery"},
+            ]
         ):
             select_option = SelectOption.objects.create(
                 field=select_field,
@@ -111,14 +112,14 @@ def load_test_data():
 
         select_field = Field.objects.get(table=suppliers_table, name="Certification")
         for order, option in enumerate(
-                [
-                    {"color": "dark-green", "value": "Organic"},
-                    {"color": "light-orange", "value": "Fair trade"},
-                    {"color": "light-green", "value": "Natural"},
-                    {"color": "light-blue", "value": "Animal protection"},
-                    {"color": "blue", "value": "Eco"},
-                    {"color": "dark-blue", "value": "Equitable"},
-                ]
+            [
+                {"color": "dark-green", "value": "Organic"},
+                {"color": "light-orange", "value": "Fair trade"},
+                {"color": "light-green", "value": "Natural"},
+                {"color": "light-blue", "value": "Animal protection"},
+                {"color": "blue", "value": "Eco"},
+                {"color": "dark-blue", "value": "Equitable"},
+            ]
         ):
             select_option = SelectOption.objects.create(
                 field=select_field,

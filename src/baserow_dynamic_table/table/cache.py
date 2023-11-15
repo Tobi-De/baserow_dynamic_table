@@ -4,7 +4,7 @@ stored in the generated models cache in a Redis backed Django cache (or in-memor
 for tests).
 
 We then store cache field_attrs in the cache key:
-    `full_table_model_{table_id}_{min_model_version}_{baserow_dynamic_table_dynamic_table_dynamic_table_VERSION}`
+    `full_table_model_{table_id}_{min_model_version}_{baserow_VERSION}`
 
 When we construct a model we:
 1. Get the table version using the table.version attribute.
@@ -68,7 +68,7 @@ def clear_generated_model_cache():
 
 
 def invalidate_table_in_model_cache(table_id: int):
-    if settings.baserow_dynamic_table_dynamic_table_dynamic_table_DISABLE_MODEL_CACHE:
+    if settings.BASEROW_DISABLE_MODEL_CACHE:
         return None
 
     new_version = str(uuid.uuid4())

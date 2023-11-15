@@ -1,4 +1,4 @@
-from baserow_dynamic_table_dynamic_table_dynamic_table.core.exceptions import LockConflict
+from baserow_dynamic_table.core.exceptions import LockConflict
 
 
 class TableDoesNotExist(Exception):

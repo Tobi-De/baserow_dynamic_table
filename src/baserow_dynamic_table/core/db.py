@@ -69,8 +69,8 @@ T = TypeVar("T", bound=Model)
 
 
 def specific_iterator(
-        queryset: QuerySet[T],
-        per_content_type_queryset_hook: Callable = None,
+    queryset: QuerySet[T],
+    per_content_type_queryset_hook: Callable = None,
 ) -> Iterable[T]:
     """
     Iterates over the given queryset and finds the specific objects with the least
@@ -191,13 +191,13 @@ class IsolationLevel:
 
 @contextlib.contextmanager
 def transaction_atomic(
-        using=None,
-        savepoint=True,
-        durable=False,
-        isolation_level: Optional[str] = None,
-        first_sql_to_run_in_transaction_with_args: Optional[
-            Tuple[sql.SQL, List[Any]]
-        ] = None,
+    using=None,
+    savepoint=True,
+    durable=False,
+    isolation_level: Optional[str] = None,
+    first_sql_to_run_in_transaction_with_args: Optional[
+        Tuple[sql.SQL, List[Any]]
+    ] = None,
 ):
     with transaction.atomic(using, savepoint, durable) as a:
         if isolation_level or first_sql_to_run_in_transaction_with_args:
@@ -213,10 +213,10 @@ def transaction_atomic(
 
 
 def get_unique_orders_before_item(
-        before: Model,
-        queryset: QuerySet,
-        amount: int = 1,
-        field: str = "order",
+    before: Model,
+    queryset: QuerySet,
+    amount: int = 1,
+    field: str = "order",
 ) -> List[Decimal]:
     """
     Calculates a list of unique decimal orders that can safely be used before the
@@ -237,8 +237,8 @@ def get_unique_orders_before_item(
     # order of the before adjacent row is. This queryset finds it in an
     # efficient way.
     adjacent_order = (
-                         queryset.filter(order__lt=before.order).aggregate(max=Max(field)).get("max")
-                     ) or Decimal("0")
+        queryset.filter(order__lt=before.order).aggregate(max=Max(field)).get("max")
+    ) or Decimal("0")
     new_orders = []
     new_order = adjacent_order
     for i in range(0, amount):
@@ -251,9 +251,9 @@ def get_unique_orders_before_item(
 
 
 def get_highest_order_of_queryset(
-        queryset: QuerySet,
-        amount: int = 1,
-        field: str = "order",
+    queryset: QuerySet,
+    amount: int = 1,
+    field: str = "order",
 ) -> List[Decimal]:
     """
     Returns the highest existing values of the provided order field.
@@ -270,9 +270,9 @@ def get_highest_order_of_queryset(
 
 
 def recalculate_full_orders(
-        model: Optional[Model] = None,
-        field="order",
-        queryset: Optional[QuerySet] = None,
+    model: Optional[Model] = None,
+    field="order",
+    queryset: Optional[QuerySet] = None,
 ):
     """
     Recalculates the order to whole numbers of all instances based on the existing
@@ -339,7 +339,7 @@ def recalculate_full_orders(
 @cache
 def get_collation_name() -> Optional[str]:
     """
-    Performs a simple check to determine if expected baserow_dynamic_table_dynamic_table_dynamic_table collation
+    Performs a simple check to determine if expected baserow collation
     can be used by sourcing pg_collation table.
 
     Returns the name of the baserow_dynamic_table_dynamic_table_dynamic_table collation if it
@@ -396,8 +396,8 @@ class MultiFieldPrefetchQuerysetMixin(Generic[ModelInstance]):
     def _fetch_all(self):
         super()._fetch_all()
         if (
-                self._multi_field_prefetch_related_funcs
-                and not self._multi_field_prefetch_done
+            self._multi_field_prefetch_related_funcs
+            and not self._multi_field_prefetch_done
         ):
             for f in self._multi_field_prefetch_related_funcs:
                 f(self, self._result_cache)
@@ -411,7 +411,7 @@ class MultiFieldPrefetchQuerysetMixin(Generic[ModelInstance]):
         return c
 
     def multi_field_prefetch(
-            self, custom_prefetch_function: Callable[[QuerySet, List[ModelInstance]], None]
+        self, custom_prefetch_function: Callable[[QuerySet, List[ModelInstance]], None]
     ):
         clone = self._chain()
         clone._multi_field_prefetch_related_funcs.append(custom_prefetch_function)
@@ -446,10 +446,10 @@ class CombinedForeignKeyAndManyToManyMultipleFieldPrefetch:
     """
 
     def __init__(
-            self,
-            target_model: Model,
-            field_names: Optional[Set] = None,
-            skip_target_check: Optional[bool] = False,
+        self,
+        target_model: Model,
+        field_names: Optional[Set] = None,
+        skip_target_check: Optional[bool] = False,
     ):
         """
         :param target_model: The model where the final prefetch query, to fetch the
@@ -506,11 +506,11 @@ class CombinedForeignKeyAndManyToManyMultipleFieldPrefetch:
         )
 
     def set_prefetched_values_on_result_set(
-            self,
-            queryset,
-            row_id_to_field_name_to_target_ids: Dict[int, Dict[str, List]],
-            result_set: List[ModelInstance],
-            target_instances: Dict[int, ModelInstance],
+        self,
+        queryset,
+        row_id_to_field_name_to_target_ids: Dict[int, Dict[str, List]],
+        result_set: List[ModelInstance],
+        target_instances: Dict[int, ModelInstance],
     ) -> List[ModelInstance]:
         """
         Sets the prefetched instances on the result set of the queryset. It will
@@ -563,7 +563,7 @@ class CombinedForeignKeyAndManyToManyMultipleFieldPrefetch:
         return result_set
 
     def fetch_target_instances(
-            self, row_id_to_field_name_to_target_ids: Dict[int, Dict[str, List]]
+        self, row_id_to_field_name_to_target_ids: Dict[int, Dict[str, List]]
     ) -> Dict[int, ModelInstance]:
         """
         Fetches all the instances of the collected ids in the target model in one
@@ -589,10 +589,10 @@ class CombinedForeignKeyAndManyToManyMultipleFieldPrefetch:
         return target_instances
 
     def collect_foreign_key_target_ids(
-            self,
-            queryset: QuerySet,
-            result_set: List[ModelInstance],
-            row_id_to_field_name_to_target_ids: Dict[int, Dict[str, List]],
+        self,
+        queryset: QuerySet,
+        result_set: List[ModelInstance],
+        row_id_to_field_name_to_target_ids: Dict[int, Dict[str, List]],
     ):
         """
         Loops over all already fetched rows of the original queryset, and collects the
@@ -615,8 +615,8 @@ class CombinedForeignKeyAndManyToManyMultipleFieldPrefetch:
                 continue
 
             if (
-                    not self.skip_target_check
-                    and model_field.remote_field.model is not self.target_model
+                not self.skip_target_check
+                and model_field.remote_field.model is not self.target_model
             ):
                 raise ValueError(
                     f"The related model of {field_name} is not equal to the target "
@@ -637,7 +637,7 @@ class CombinedForeignKeyAndManyToManyMultipleFieldPrefetch:
         return row_id_to_field_name_to_target_ids
 
     def collect_many_to_many_key_target_ids(
-            self, queryset: QuerySet, result_set, row_id_to_field_name_to_target_ids
+        self, queryset: QuerySet, result_set, row_id_to_field_name_to_target_ids
     ):
         """
         Loops over all already fetched rows of the original queryset, and collects the
@@ -669,8 +669,8 @@ class CombinedForeignKeyAndManyToManyMultipleFieldPrefetch:
             target_column_name = through_fields[2].get_attname_column()[1]
 
             if (
-                    not self.skip_target_check
-                    and through_fields[2].remote_field.model is not self.target_model
+                not self.skip_target_check
+                and through_fields[2].remote_field.model is not self.target_model
             ):
                 raise ValueError(
                     f"The related model of {field_name} is not equal to the target "

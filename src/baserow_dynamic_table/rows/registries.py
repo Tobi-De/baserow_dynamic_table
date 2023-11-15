@@ -1,11 +1,11 @@
 import abc
 from typing import Any, Dict, Generator, List
 
-from baserow_dynamic_table_dynamic_table_dynamic_table.core.models import Workspace
-from baserow_dynamic_table_dynamic_table_dynamic_table.core.registry import Instance, Registry
-from baserow_dynamic_table.rows.models import RowHistory
 from django.db.models import QuerySet
 from rest_framework.fields import Field
+
+from baserow_dynamic_table.core.registry import Instance, Registry
+from baserow_dynamic_table.rows.models import RowHistory
 
 
 class RowMetadataRegistry(Registry):
@@ -27,7 +27,7 @@ class RowMetadataRegistry(Registry):
         ).get(row_id, {})
 
     def generate_and_merge_metadata_for_rows(
-            self, table, row_ids: Generator[int, None, None]
+        self, table, row_ids: Generator[int, None, None]
     ) -> Dict[int, Dict[str, Any]]:
         """
         For every type of row metadata will generate that type of metadata for each
@@ -117,11 +117,10 @@ class ChangeRowHistoryRegistry(Registry):
 class ChangeRowHistoryType(Instance, abc.ABC):
     @abc.abstractmethod
     def apply_to_list_queryset(
-            self,
-            queryset: QuerySet[RowHistory],
-            workspace: Workspace,
-            table_id: int,
-            row_id: int,
+        self,
+        queryset: QuerySet[RowHistory],
+        table_id: int,
+        row_id: int,
     ) -> QuerySet[RowHistory]:
         """
         By implementing this method you can further filter the

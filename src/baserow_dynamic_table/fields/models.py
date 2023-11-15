@@ -325,7 +325,8 @@ class LinkRowField(Field):
         null=True,
         blank=True,
     )
-    link_row_relation_id = SerialField(null=True, unique=False)
+    # link_row_relation_id = SerialField(null=True, unique=False)
+    link_row_relation_id = SerialField(unique=False)
 
     @property
     def through_table_name(self):
