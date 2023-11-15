@@ -1,13 +1,17 @@
 from io import BytesIO
 
+from baserow_dynamic_table.fields.models import (
+    Field,
+    SelectOption,
+)
+from baserow_dynamic_table.fields.registries import (
+    field_type_registry,
+)
+from baserow_dynamic_table.table.handler import TableHandler
+from baserow_dynamic_table.table.models import Table
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from faker import Faker
-
-from baserow_dynamic_table.fields.models import Field, SelectOption
-from baserow_dynamic_table.fields.registries import field_type_registry
-from baserow_dynamic_table.table.handler import TableHandler
-from baserow_dynamic_table.table.models import Table
 
 User = get_user_model()
 
@@ -17,7 +21,7 @@ def load_test_data():
     fake = Faker()
     print("Add basic data...")
 
-    user = User.objects.get(email="admin@baserow.io")
+    user = User.objects.get(email="admin@baserow_dynamic_table_dynamic_table_dynamic_table.io")
 
     try:
         products_table = Table.objects.get(name="Products")

@@ -1,10 +1,11 @@
 import json
 import traceback
 
-from django.core.management.base import BaseCommand
-
-from baserow_dynamic_table.fields.registries import field_type_registry
+from baserow_dynamic_table.fields.registries import (
+    field_type_registry,
+)
 from baserow_dynamic_table.table.models import Table
+from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):

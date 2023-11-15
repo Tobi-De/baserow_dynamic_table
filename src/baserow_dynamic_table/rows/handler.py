@@ -17,6 +17,36 @@ from typing import (
     cast,
 )
 
+from baserow_dynamic_table.core.db import (
+    get_highest_order_of_queryset,
+    get_unique_orders_before_item,
+    recalculate_full_orders,
+)
+from baserow_dynamic_table.core.utils import (
+    Progress,
+    get_non_unique_values,
+    grouper,
+    CannotCalculateIntermediateOrder,
+)
+from baserow_dynamic_table.fields.dependencies.handler import (
+    FieldDependencyHandler,
+)
+from baserow_dynamic_table.fields.dependencies.update_collector import (
+    FieldUpdateCollector,
+)
+from baserow_dynamic_table.fields.field_cache import FieldCache
+from baserow_dynamic_table.fields.field_filters import (
+    FILTER_TYPE_OR,
+    AnnotatedQ,
+    FilterBuilder,
+)
+from baserow_dynamic_table.fields.registries import (
+    FieldType,
+    field_type_registry,
+)
+from baserow_dynamic_table.models import GeneratedTableModel, Table
+from baserow_dynamic_table.trash.handler import TrashHandler
+from baserow_dynamic_table.trash.models import TrashedRows
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -24,62 +54,11 @@ from django.db.models import Q, QuerySet
 from django.db.models.fields.related import ForeignKey, ManyToManyField
 from django.utils.encoding import force_str
 
-from opentelemetry import metrics, trace
-
-from baserow.contrib.database.api.rows.serializers import serialize_rows_for_response
-from baserow.contrib.database.fields.dependencies.handler import FieldDependencyHandler
-from baserow.contrib.database.fields.dependencies.update_collector import (
-    FieldUpdateCollector,
-)
-from baserow.contrib.database.fields.field_cache import FieldCache
-from baserow.contrib.database.fields.field_filters import (
-    FILTER_TYPE_OR,
-    AnnotatedQ,
-    FilterBuilder,
-)
-from baserow.contrib.database.fields.registries import FieldType, field_type_registry
-from baserow.contrib.database.table.models import GeneratedTableModel, Table
-from baserow.contrib.database.table.operations import (
-    CreateRowDatabaseTableOperationType,
-    ImportRowsDatabaseTableOperationType,
-)
-from baserow.contrib.database.table.signals import table_updated
-from baserow.contrib.database.trash.models import TrashedRows
-from baserow.core.db import (
-    get_highest_order_of_queryset,
-    get_unique_orders_before_item,
-    recalculate_full_orders,
-)
-from baserow.core.exceptions import CannotCalculateIntermediateOrder
-from baserow.core.handler import CoreHandler
-from baserow.core.telemetry.utils import baserow_trace_methods
-from baserow.core.trash.handler import TrashHandler
-from baserow.core.utils import Progress, get_non_unique_values, grouper
-
-from ..search.handler import SearchHandler
-from ..table.constants import ROW_NEEDS_BACKGROUND_UPDATE_COLUMN_NAME
 from .constants import ROW_IMPORT_CREATION, ROW_IMPORT_VALIDATION
-from .error_report import RowErrorReport
 from .exceptions import RowDoesNotExist, RowIdsNotUnique
-from .operations import (
-    DeleteDatabaseRowOperationType,
-    MoveRowDatabaseRowOperationType,
-    ReadDatabaseRowOperationType,
-    UpdateDatabaseRowOperationType,
-)
-from .signals import (
-    before_rows_delete,
-    before_rows_update,
-    row_orders_recalculated,
-    rows_created,
-    rows_deleted,
-    rows_updated,
-)
 
 if TYPE_CHECKING:
-    from baserow.contrib.database.fields.models import Field
-
-tracer = trace.get_tracer(__name__)
+    from baserow_dynamic_table.fields.models import Field
 
 GeneratedTableModelForUpdate = NewType(
     "GeneratedTableModelForUpdate", GeneratedTableModel
@@ -87,25 +66,7 @@ GeneratedTableModelForUpdate = NewType(
 
 RowsForUpdate = NewType("RowsForUpdate", QuerySet)
 
-
 BATCH_SIZE = 1024
-
-meter = metrics.get_meter(__name__)
-rows_created_counter = meter.create_counter(
-    "baserow.rows_created",
-    unit="1",
-    description="The number of rows created in user tables.",
-)
-rows_updated_counter = meter.create_counter(
-    "baserow.rows_updated",
-    unit="1",
-    description="The number of rows updated in user tables.",
-)
-rows_deleted_counter = meter.create_counter(
-    "baserow.rows_deleted",
-    unit="1",
-    description="The number of rows deleted in user tables.",
-)
 
 
 def serialize_errors_recursive(error):
@@ -158,11 +119,11 @@ class RowM2MChangeTracker:
         ] = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
 
     def track_m2m_update_for_field_and_row(
-        self,
-        field: "Field",
-        field_name: str,
-        row: GeneratedTableModel,
-        new_values: Iterable[int],
+            self,
+            field: "Field",
+            field_name: str,
+            row: GeneratedTableModel,
+            new_values: Iterable[int],
     ):
         field_type = field_type_registry.get_by_model(field)
         if field_type.is_many_to_many_field:
@@ -170,33 +131,35 @@ class RowM2MChangeTracker:
             m2m_rels_before_update = {r.id for r in getattr(row, field_name).all()}
             set_of_new_values = set(new_values)
             self._deleted_m2m_rels[field_type.type][field][row] = (
-                m2m_rels_before_update - set_of_new_values
+                    m2m_rels_before_update - set_of_new_values
             )
             self._created_m2m_rels[field_type.type][field][row] = (
-                set_of_new_values - m2m_rels_before_update
+                    set_of_new_values - m2m_rels_before_update
             )
 
     def track_m2m_created_for_new_row(
-        self, row: GeneratedTableModel, field: "Field", new_values: Iterable[int]
+            self, row: GeneratedTableModel, field: "Field", new_values: Iterable[int]
     ):
         field_type = field_type_registry.get_by_model(field)
         if field_type.is_many_to_many_field:
             self._created_m2m_rels[field_type.type][field][row] = set(new_values)
 
     def get_deleted_m2m_rels_per_field_id_for_type(
-        self, field_type: str
+            self, field_type: str
     ) -> Dict[int, Set[int]]:
         return self._deleted_m2m_rels[field_type]
 
     def get_created_m2m_rels_per_field_for_type(
-        self, field_type
+            self, field_type
     ) -> Dict["Field", Dict[GeneratedTableModel, Set[int]]]:
         return self._created_m2m_rels[field_type]
 
     def get_deleted_link_row_rels_for_update_collector(
-        self,
+            self,
     ) -> Dict[int, Set[int]]:
-        from baserow.contrib.database.fields.field_types import LinkRowFieldType
+        from baserow_dynamic_table.fields.field_types import (
+            LinkRowFieldType,
+        )
 
         return {
             field.id: set().union(*list(deleted_rels_per_row.values()))
@@ -206,7 +169,7 @@ class RowM2MChangeTracker:
         }
 
 
-class RowHandler(metaclass=baserow_trace_methods(tracer)):
+class RowHandler:
     def prepare_values(self, fields, values):
         """
         Prepares a set of values so that they can be created or updated in the database.
@@ -232,10 +195,10 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         }
 
     def prepare_rows_in_bulk(
-        self,
-        fields: Dict[int, Dict[str, Any]],
-        rows: List[Dict[str, Any]],
-        generate_error_report: bool = False,
+            self,
+            fields: Dict[int, Dict[str, Any]],
+            rows: List[Dict[str, Any]],
+            generate_error_report: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]]]:
         """
         Prepares a set of values in bulk for all rows so that they can be created or
@@ -322,9 +285,9 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return self.extract_field_ids_from_keys(values.keys())
 
     def get_internal_values_for_fields(
-        self,
-        row: GeneratedTableModel,
-        updated_field_ids: Set[int],
+            self,
+            row: GeneratedTableModel,
+            updated_field_ids: Set[int],
     ) -> Dict[str, Any]:
         """
         Gets the current values of the row before the update.
@@ -346,7 +309,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return values
 
     def extract_manytomany_values(
-        self, values: Dict[str, Any], model: "GeneratedTableModel"
+            self, values: Dict[str, Any], model: "GeneratedTableModel"
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Split the row values and the many_to_many values from the prepared
@@ -374,10 +337,10 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return row_values, manytomany_values
 
     def get_unique_orders_before_row(
-        self,
-        before_row: Optional[GeneratedTableModel],
-        model: Type[GeneratedTableModel],
-        amount: int = 1,
+            self,
+            before_row: Optional[GeneratedTableModel],
+            model: Type[GeneratedTableModel],
+            amount: int = 1,
     ) -> List[Decimal]:
         """
         Calculates a list of unique decimal orders that can safely be used before the
@@ -409,7 +372,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
                 # calculate an intermediate fraction. Therefore, must reset all the
                 # orders of the table (while respecting their original order),
                 # so that we can then can find the fraction any many more after.
-                self.recalculate_row_orders(model.baserow_table, model)
+                self.recalculate_row_orders(model.baserow_dynamic_table_dynamic_table_dynamic_table_table, model)
                 # Refresh the row element as its order might have changed
                 before_row.refresh_from_db()
                 return get_unique_orders_before_item(
@@ -421,12 +384,11 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             return get_highest_order_of_queryset(queryset, amount=amount)
 
     def get_row(
-        self,
-        user: AbstractUser,
-        table: Table,
-        row_id: int,
-        model: Optional[Type[GeneratedTableModel]] = None,
-        base_queryset: Optional[QuerySet] = None,
+            self,
+            table: Table,
+            row_id: int,
+            model: Optional[Type[GeneratedTableModel]] = None,
+            base_queryset: Optional[QuerySet] = None,
     ) -> GeneratedTableModel:
         """
         Fetches a single row from the provided table.
@@ -447,14 +409,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
 
         if base_queryset is None:
             base_queryset = model.objects
-
-        workspace = table.database.workspace
-        CoreHandler().check_permissions(
-            user,
-            ReadDatabaseRowOperationType.type,
-            workspace=workspace,
-            context=table,
-        )
 
         try:
             row = base_queryset.get(id=row_id)
@@ -480,20 +434,14 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         :return: The adjacent rows.
         """
 
-        from baserow.contrib.database.views.handler import ViewHandler
-
         default_sorting = ["order", "id"]
 
         if previous:
             original_queryset = original_queryset.reverse()
 
-        # Sort query set
-        if view:
-            queryset_sorted = ViewHandler().apply_sorting(view, original_queryset)
-        else:
-            direction_prefix = "-" if previous else ""
-            sorting = [f"{direction_prefix}{sort}" for sort in default_sorting]
-            queryset_sorted = original_queryset.order_by(*sorting)
+        direction_prefix = "-" if previous else ""
+        sorting = [f"{direction_prefix}{sort}" for sort in default_sorting]
+        queryset_sorted = original_queryset.order_by(*sorting)
 
         # Apply filters to find the adjacent row
         filter_builder = FilterBuilder(FILTER_TYPE_OR)
@@ -568,12 +516,12 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return queryset_filtered.first()
 
     def get_row_for_update(
-        self,
-        user: AbstractUser,
-        table: Table,
-        row_id: int,
-        enhance_by_fields: bool = False,
-        model: Optional[Type[GeneratedTableModel]] = None,
+            self,
+            user: AbstractUser,
+            table: Table,
+            row_id: int,
+            enhance_by_fields: bool = False,
+            model: Optional[Type[GeneratedTableModel]] = None,
     ) -> GeneratedTableModelForUpdate:
         """
         Fetches a single row from the provided table and lock it for update.
@@ -607,7 +555,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return cast(GeneratedTableModelForUpdate, row)
 
     def get_row_names(
-        self, table: "Table", row_ids: List[int], model: "GeneratedTableModel" = None
+            self, table: "Table", row_ids: List[int], model: "GeneratedTableModel" = None
     ) -> Dict[str, str]:
         """
         Returns the row names for all row ids specified in `row_ids` parameter from
@@ -632,7 +580,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return {row.id: str(row) for row in queryset}
 
     # noinspection PyMethodMayBeStatic
-    def has_row(self, user, table, row_id, raise_error=False, model=None):
+    def has_row(self, table, row_id, raise_error=False, model=None):
         """
         Checks if a row with the given id exists and is not trashed in the table.
 
@@ -660,13 +608,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         :rtype: bool
         """
 
-        CoreHandler().check_permissions(
-            user,
-            ReadDatabaseRowOperationType.type,
-            workspace=table.database.workspace,
-            context=table,
-        )
-
         if model is None:
             model = table.get_model(field_ids=[])
 
@@ -677,13 +618,13 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             return row_exists
 
     def create_row(
-        self,
-        user: AbstractUser,
-        table: Table,
-        values: Optional[Dict[str, Any]] = None,
-        model: Optional[Type[GeneratedTableModel]] = None,
-        before_row: Optional[GeneratedTableModel] = None,
-        user_field_names: bool = False,
+            self,
+            user: AbstractUser,
+            table: Table,
+            values: Optional[Dict[str, Any]] = None,
+            model: Optional[Type[GeneratedTableModel]] = None,
+            before_row: Optional[GeneratedTableModel] = None,
+            user_field_names: bool = False,
     ) -> GeneratedTableModel:
         """
         Creates a new row for a given table with the provided values if the user
@@ -698,32 +639,25 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         :param before_row: If provided the new row will be placed right before that row
             instance.
         :param user_field_names: Whether or not the values are keyed by the internal
-            Baserow field name (field_1,field_2 etc) or by the user field names.
+            baserow_dynamic_table_dynamic_table_dynamic_table field name (field_1,field_2 etc) or by the user field names.
         :return: The created row instance.
         """
 
         if model is None:
             model = table.get_model()
 
-        CoreHandler().check_permissions(
-            user,
-            CreateRowDatabaseTableOperationType.type,
-            workspace=table.database.workspace,
-            context=table,
-        )
-
         return self.force_create_row(
             user, table, values, model, before_row, user_field_names
         )
 
     def force_create_row(
-        self,
-        user: AbstractUser,
-        table: Table,
-        values: Optional[Dict[str, Any]] = None,
-        model: Optional[Type[GeneratedTableModel]] = None,
-        before: Optional[GeneratedTableModel] = None,
-        user_field_names: bool = False,
+            self,
+            user: AbstractUser,
+            table: Table,
+            values: Optional[Dict[str, Any]] = None,
+            model: Optional[Type[GeneratedTableModel]] = None,
+            before: Optional[GeneratedTableModel] = None,
+            user_field_names: bool = False,
     ):
         """
         Creates a new row for a given table with the provided values.
@@ -738,7 +672,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         :param before: If provided the new row will be placed right before that row
             instance.
         :param user_field_names: Whether or not the values are keyed by the internal
-            Baserow field name (field_1,field_2 etc) or by the user field names.
+            baserow_dynamic_table_dynamic_table_dynamic_table field name (field_1,field_2 etc) or by the user field names.
         :return: The created row instance.
         :rtype: Model
         """
@@ -760,7 +694,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         )
         row_values["order"] = self.get_unique_orders_before_row(before, model)[0]
         instance = model.objects.create(**row_values)
-        rows_created_counter.add(1)
 
         m2m_change_tracker = RowM2MChangeTracker()
         for name, value in manytomany_values.items():
@@ -786,9 +719,9 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             )
 
         for (
-            dependant_field,
-            dependant_field_type,
-            path_to_starting_table,
+                dependant_field,
+                dependant_field_type,
+                path_to_starting_table,
         ) in FieldDependencyHandler.get_dependant_fields_with_type(
             table.id,
             field_ids,
@@ -809,42 +742,24 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
                 fields=model.fields_requiring_refresh_after_insert()
             )
 
-        from baserow.contrib.database.views.handler import ViewHandler
-
-        ViewHandler().field_value_updated(fields)
-        SearchHandler.field_value_updated_or_created(table)
-
-        rows_created.send(
-            self,
-            rows=[instance],
-            before=before,
-            user=user,
-            table=table,
-            model=model,
-            send_realtime_update=True,
-            send_webhook_events=True,
-            rows_values_refreshed_from_db=False,
-            m2m_change_tracker=m2m_change_tracker,
-        )
-
         return instance
 
     # noinspection PyMethodMayBeStatic
     def map_user_field_name_dict_to_internal(
-        self,
-        field_objects,
-        values,
+            self,
+            field_objects,
+            values,
     ):
         """
         Takes the field objects for a model and a dictionary keyed by user specified
         field names for that model. Then will convert the keys from the user names to
-        the internal Baserow field names which look like field_1, field_2 and
+        the internal baserow_dynamic_table_dynamic_table_dynamic_table field names which look like field_1, field_2 and
         correspond to the actual database column names.
 
         :param field_objects: The field objects for a model.
         :param values: A dictionary keyed by user field names to values.
         :return: A dictionary with the same values but the keys converted to the
-            corresponding internal baserow field name (field_1,field_2 etc)
+            corresponding internal baserow_dynamic_table_dynamic_table_dynamic_table field name (field_1,field_2 etc)
         """
 
         to_internal_name = {}
@@ -859,12 +774,12 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return values
 
     def update_row_by_id(
-        self,
-        user: AbstractUser,
-        table: Table,
-        row_id: int,
-        values: Dict[str, Any],
-        model: Optional[Type[GeneratedTableModel]] = None,
+            self,
+            user: AbstractUser,
+            table: Table,
+            row_id: int,
+            values: Dict[str, Any],
+            model: Optional[Type[GeneratedTableModel]] = None,
     ) -> GeneratedTableModelForUpdate:
         """
         Updates one or more values of the provided row_id.
@@ -889,12 +804,12 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             return self.update_row(user, table, row, values, model=model)
 
     def update_row(
-        self,
-        user: AbstractUser,
-        table: Table,
-        row: GeneratedTableModelForUpdate,
-        values: Dict[str, Any],
-        model: Optional[Type[GeneratedTableModel]] = None,
+            self,
+            user: AbstractUser,
+            table: Table,
+            row: GeneratedTableModelForUpdate,
+            values: Dict[str, Any],
+            model: Optional[Type[GeneratedTableModel]] = None,
     ) -> GeneratedTableModelForUpdate:
         """
         Updates one or more values of the provided row_id.
@@ -909,14 +824,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         :return: The updated row instance.
         """
 
-        workspace = table.database.workspace
-        CoreHandler().check_permissions(
-            user,
-            UpdateDatabaseRowOperationType.type,
-            workspace=workspace,
-            context=table,
-        )
-
         if model is None:
             model = table.get_model()
 
@@ -929,17 +836,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
                 updated_fields_by_name[field["name"]] = field["field"]
                 updated_fields.append(field["field"])
 
-        rows = [row]
-        before_return = before_rows_update.send(
-            self,
-            rows=rows,
-            user=user,
-            table=table,
-            model=model,
-            updated_field_ids=updated_field_ids,
-        )
-
-        before_rows_values = serialize_rows_for_response(rows, model)
         prepared_values = self.prepare_values(model._field_objects, values)
         row_values, manytomany_values = self.extract_manytomany_values(
             prepared_values, model
@@ -962,7 +858,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             getattr(row, name).set(value)
 
         row.save()
-        rows_updated_counter.add(1)
 
         update_collector = FieldUpdateCollector(
             table,
@@ -972,9 +867,9 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         field_cache = FieldCache()
         field_cache.cache_model(model)
         for (
-            dependant_field,
-            dependant_field_type,
-            path_to_starting_table,
+                dependant_field,
+                dependant_field_type,
+                path_to_starting_table,
         ) in FieldDependencyHandler.get_dependant_fields_with_type(
             table.id,
             updated_field_ids,
@@ -994,36 +889,19 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         # query for the rows updated values instead.
         row.refresh_from_db(fields=model.fields_requiring_refresh_after_update())
 
-        from baserow.contrib.database.views.handler import ViewHandler
-
-        ViewHandler().field_value_updated(updated_fields)
-        SearchHandler.field_value_updated_or_created(table)
-
-        rows_updated.send(
-            self,
-            rows=rows,
-            user=user,
-            table=table,
-            model=model,
-            before_return=before_return,
-            updated_field_ids=updated_field_ids,
-            before_rows_values=before_rows_values,
-            m2m_change_tracker=m2m_change_tracker,
-        )
-
         return row
 
     def create_rows(
-        self,
-        user: AbstractUser,
-        table: Table,
-        rows_values: List[Dict[str, Any]],
-        before_row: Optional[GeneratedTableModel] = None,
-        model: Optional[Type[GeneratedTableModel]] = None,
-        send_realtime_update: bool = True,
-        send_webhook_events: bool = True,
-        generate_error_report: bool = False,
-        skip_search_update: bool = False,
+            self,
+            user: AbstractUser,
+            table: Table,
+            rows_values: List[Dict[str, Any]],
+            before_row: Optional[GeneratedTableModel] = None,
+            model: Optional[Type[GeneratedTableModel]] = None,
+            send_realtime_update: bool = True,
+            send_webhook_events: bool = True,
+            generate_error_report: bool = False,
+            skip_search_update: bool = False,
     ) -> List[GeneratedTableModel]:
         """
         Creates new rows for a given table if the user
@@ -1045,14 +923,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         :return: The created row instances.
         """
 
-        workspace = table.database.workspace
-        CoreHandler().check_permissions(
-            user,
-            CreateRowDatabaseTableOperationType.type,
-            workspace=workspace,
-            context=table,
-        )
-
         if model is None:
             model = table.get_model()
 
@@ -1070,7 +940,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
 
         rows_relationships = []
         for index, row in enumerate(
-            prepared_rows_values, start=-len(prepared_rows_values)
+                prepared_rows_values, start=-len(prepared_rows_values)
         ):
             row_values, manytomany_values = self.extract_manytomany_values(row, model)
             row_values["order"] = unique_orders[index]
@@ -1086,7 +956,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         inserted_rows = model.objects.bulk_create(
             [row for (row, _) in rows_relationships]
         )
-        rows_created_counter.add(len(rows_relationships))
 
         many_to_many = defaultdict(list)
         m2m_change_tracker = RowM2MChangeTracker()
@@ -1101,7 +970,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
 
                 model_field = model._meta.get_field(field_name)
                 is_referencing_the_same_table = (
-                    model_field.model == model_field.related_model
+                        model_field.model == model_field.related_model
                 )
 
                 # Figure out which field in the many to many through table holds the row
@@ -1156,9 +1025,9 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             )
 
         for (
-            dependant_field,
-            dependant_field_type,
-            path_to_starting_table,
+                dependant_field,
+                dependant_field_type,
+                path_to_starting_table,
         ) in FieldDependencyHandler.get_dependant_fields_with_type(
             table.id,
             field_ids,
@@ -1174,13 +1043,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             )
         update_collector.apply_updates_and_get_updated_fields(field_cache)
 
-        from baserow.contrib.database.views.handler import ViewHandler
-
-        updated_fields = [o["field"] for o in model._field_objects.values()]
-        ViewHandler().field_value_updated(updated_fields)
-        if not skip_search_update:
-            SearchHandler.field_value_updated_or_created(table)
-
         rows_to_return = inserted_rows
         rows_values_refreshed_from_db = False
         if send_realtime_update or send_webhook_events:
@@ -1194,29 +1056,15 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             )
             rows_values_refreshed_from_db = True
 
-        rows_created.send(
-            self,
-            rows=rows_to_return,
-            before=before_row,
-            user=user,
-            table=table,
-            model=model,
-            rows_values_refreshed_from_db=rows_values_refreshed_from_db,
-            send_realtime_update=send_realtime_update,
-            send_webhook_events=send_webhook_events,
-            prepared_rows_values=prepared_rows_values,
-            m2m_change_tracker=m2m_change_tracker,
-        )
-
         if generate_error_report:
             return inserted_rows, report
         return rows_to_return
 
     def validate_rows(
-        self,
-        table: Table,
-        rows: List[Dict[str, Any]],
-        progress: Optional[Progress] = None,
+            self,
+            table: Table,
+            rows: List[Dict[str, Any]],
+            progress: Optional[Progress] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Validates rows by batch and generates an error report.
@@ -1227,12 +1075,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         :param progress: Give a progress instance to track the progress of the import.
         :return: The error report.
         """
-
-        from baserow.api.exceptions import RequestBodyValidationException
-        from baserow.api.utils import validate_data
-        from baserow.contrib.database.api.rows.serializers import (
-            get_row_serializer_class,
-        )
 
         if not rows:
             return {}
@@ -1258,12 +1100,12 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return report
 
     def create_rows_by_batch(
-        self,
-        user: AbstractUser,
-        table: Table,
-        rows: List[Dict[str, Any]],
-        progress: Optional[Progress] = None,
-        model: Optional[Type[GeneratedTableModel]] = None,
+            self,
+            user: AbstractUser,
+            table: Table,
+            rows: List[Dict[str, Any]],
+            progress: Optional[Progress] = None,
+            model: Optional[Type[GeneratedTableModel]] = None,
     ) -> Tuple[List[GeneratedTableModel], Dict[str, Dict[str, Any]]]:
         """
         Creates rows by batch and generates an error report instead of failing on first
@@ -1313,18 +1155,16 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
 
             all_created_rows += created_rows
 
-        SearchHandler.field_value_updated_or_created(table)
-
         return all_created_rows, report
 
     def import_rows(
-        self,
-        user: AbstractUser,
-        table: Table,
-        data: List[List[Any]],
-        validate: bool = True,
-        progress: Optional[Progress] = None,
-        send_realtime_update: bool = True,
+            self,
+            user: AbstractUser,
+            table: Table,
+            data: List[List[Any]],
+            validate: bool = True,
+            progress: Optional[Progress] = None,
+            send_realtime_update: bool = True,
     ) -> Tuple[List[GeneratedTableModel], Dict[str, Dict[str, Any]]]:
         """
         Creates new rows for a given table if the user belongs to the related
@@ -1345,16 +1185,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
 
         :return: The created row instances and the error report.
         """
-
-        workspace = table.database.workspace
-        CoreHandler().check_permissions(
-            user,
-            ImportRowsDatabaseTableOperationType.type,
-            workspace=workspace,
-            context=table,
-        )
-
-        error_report = RowErrorReport(data)
 
         model = table.get_model()
 
@@ -1437,10 +1267,10 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return created_rows, error_report.to_dict()
 
     def get_fields_metadata_for_row_history(
-        self,
-        row: GeneratedTableModelForUpdate,
-        updated_fields: List["Field"],
-        metadata,
+            self,
+            row: GeneratedTableModelForUpdate,
+            updated_fields: List["Field"],
+            metadata,
     ) -> FieldsMetadata:
         """
         Serializes the metadata for the fields that have changed for a given
@@ -1459,10 +1289,10 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return {"id": row.id, **fields_metadata}
 
     def get_fields_metadata_for_rows(
-        self,
-        rows: List[GeneratedTableModelForUpdate],
-        updated_fields: List["Field"],
-        fields_metadata_by_row_id=None,
+            self,
+            rows: List[GeneratedTableModelForUpdate],
+            updated_fields: List["Field"],
+            fields_metadata_by_row_id=None,
     ) -> Dict[RowId, FieldsMetadata]:
         """
         For each row, return a dictionary containing the metadata of the
@@ -1488,12 +1318,12 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return fields_metadata_by_row_id
 
     def update_rows(
-        self,
-        user: AbstractUser,
-        table: Table,
-        rows_values: List[Dict[str, Any]],
-        model: Optional[Type[GeneratedTableModel]] = None,
-        rows_to_update: Optional[RowsForUpdate] = None,
+            self,
+            user: AbstractUser,
+            table: Table,
+            rows_values: List[Dict[str, Any]],
+            model: Optional[Type[GeneratedTableModel]] = None,
+            rows_to_update: Optional[RowsForUpdate] = None,
     ) -> UpdatedRowsWithOldValuesAndMetadata:
         """
         Updates field values in batch based on provided rows with the new
@@ -1513,13 +1343,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         :return: An UpdatedRow named tuple containing the updated rows
             instances, the original row values and the updated fields metadata.
         """
-
-        CoreHandler().check_permissions(
-            user,
-            UpdateDatabaseRowOperationType.type,
-            workspace=table.database.workspace,
-            context=table,
-        )
 
         if model is None:
             model = table.get_model()
@@ -1564,17 +1387,6 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             values = self.get_internal_values_for_fields(row, updated_field_ids)
             values["id"] = row.id
             original_row_values_by_id[row.id] = values
-
-        before_rows_values = serialize_rows_for_response(rows_to_update, model)
-
-        before_return = before_rows_update.send(
-            self,
-            rows=list(rows_to_update),
-            user=user,
-            table=table,
-            model=model,
-            updated_field_ids=updated_field_ids,
-        )
 
         rows_relationships = []
         for obj in rows_to_update:
@@ -1630,7 +1442,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
 
                 model_field = model._meta.get_field(field_name)
                 is_referencing_the_same_table = (
-                    model_field.model == model_field.related_model
+                        model_field.model == model_field.related_model
                 )
 
                 # Figure out which field in the many to many through table holds the row
@@ -1714,9 +1526,9 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         field_cache = FieldCache()
         field_cache.cache_model(model)
         for (
-            dependant_field,
-            dependant_field_type,
-            path_to_starting_table,
+                dependant_field,
+                dependant_field_type,
+                path_to_starting_table,
         ) in FieldDependencyHandler.get_dependant_fields_with_type(
             table.id,
             updated_field_ids,
@@ -1732,7 +1544,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             )
         update_collector.apply_updates_and_get_updated_fields(field_cache)
 
-        from baserow.contrib.database.views.handler import ViewHandler
+        from baserow_dynamic_table.views.handler import ViewHandler
 
         ViewHandler().field_value_updated(updated_fields)
         SearchHandler.field_value_updated_or_created(table)
@@ -1763,7 +1575,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         )
 
     def get_rows_for_update(
-        self, model: GeneratedTableModel, row_ids: List[int]
+            self, model: GeneratedTableModel, row_ids: List[int]
     ) -> RowsForUpdate:
         """
         Get the rows to update. This method doesn't guarantee that the rows
@@ -1779,12 +1591,12 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         )
 
     def move_row_by_id(
-        self,
-        user: AbstractUser,
-        table: Table,
-        row_id: int,
-        before_row: Optional[GeneratedTableModel] = None,
-        model: Optional[Type[GeneratedTableModel]] = None,
+            self,
+            user: AbstractUser,
+            table: Table,
+            row_id: int,
+            before_row: Optional[GeneratedTableModel] = None,
+            model: Optional[Type[GeneratedTableModel]] = None,
     ) -> GeneratedTableModelForUpdate:
         """
         Updates the row order value.
@@ -1806,12 +1618,12 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             return self.move_row(user, table, row, before_row=before_row, model=model)
 
     def move_row(
-        self,
-        user: AbstractUser,
-        table: Table,
-        row: GeneratedTableModelForUpdate,
-        before_row: Optional[GeneratedTableModel] = None,
-        model: Optional[Type[GeneratedTableModel]] = None,
+            self,
+            user: AbstractUser,
+            table: Table,
+            row: GeneratedTableModelForUpdate,
+            before_row: Optional[GeneratedTableModel] = None,
+            model: Optional[Type[GeneratedTableModel]] = None,
     ) -> GeneratedTableModelForUpdate:
         """
         Updates the row order value.
@@ -1828,7 +1640,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         workspace = table.database.workspace
         CoreHandler().check_permissions(
             user,
-            MoveRowDatabaseRowOperationType.type,
+            MoveRowDatabaserow_dynamic_table_dynamic_table_dynamic_tableOperationType.type,
             workspace=workspace,
             context=table,
         )
@@ -1855,9 +1667,9 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             updated_fields.append(field)
 
         for (
-            dependant_field,
-            dependant_field_type,
-            path_to_starting_table,
+                dependant_field,
+                dependant_field_type,
+                path_to_starting_table,
         ) in FieldDependencyHandler.get_dependant_fields_with_type(
             table.id,
             updated_field_ids,
@@ -1873,7 +1685,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             )
         update_collector.apply_updates_and_get_updated_fields(field_cache)
 
-        from baserow.contrib.database.views.handler import ViewHandler
+        from baserow_dynamic_table.views.handler import ViewHandler
 
         ViewHandler().field_value_updated(updated_fields)
 
@@ -1892,11 +1704,11 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         return row
 
     def delete_row_by_id(
-        self,
-        user: AbstractUser,
-        table: Table,
-        row_id: int,
-        model: Optional[Type[GeneratedTableModel]] = None,
+            self,
+            user: AbstractUser,
+            table: Table,
+            row_id: int,
+            model: Optional[Type[GeneratedTableModel]] = None,
     ):
         """
         Deletes an existing row of the given table and with row_id.
@@ -1917,11 +1729,11 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             self.delete_row(user, table, row, model=model)
 
     def delete_row(
-        self,
-        user: AbstractUser,
-        table: Table,
-        row: GeneratedTableModelForUpdate,
-        model: Optional[Type[GeneratedTableModel]] = None,
+            self,
+            user: AbstractUser,
+            table: Table,
+            row: GeneratedTableModelForUpdate,
+            model: Optional[Type[GeneratedTableModel]] = None,
     ):
         """
         Deletes an existing row of the given table and with row_id.
@@ -1936,7 +1748,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         workspace = table.database.workspace
         CoreHandler().check_permissions(
             user,
-            DeleteDatabaseRowOperationType.type,
+            DeleteDatabaserow_dynamic_table_dynamic_table_dynamic_tableOperationType.type,
             workspace=workspace,
             context=table,
         )
@@ -1965,9 +1777,9 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             updated_fields.append(field)
 
         for (
-            dependant_field,
-            dependant_field_type,
-            path_to_starting_table,
+                dependant_field,
+                dependant_field_type,
+                path_to_starting_table,
         ) in FieldDependencyHandler.get_dependant_fields_with_type(
             table.id,
             updated_field_ids,
@@ -1983,7 +1795,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             )
         update_collector.apply_updates_and_get_updated_fields(field_cache)
 
-        from baserow.contrib.database.views.handler import ViewHandler
+        from baserow_dynamic_table.views.handler import ViewHandler
 
         ViewHandler().field_value_updated(updated_fields)
 
@@ -1997,11 +1809,11 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         )
 
     def delete_rows(
-        self,
-        user: AbstractUser,
-        table: Table,
-        row_ids: List[int],
-        model: Optional[Type[GeneratedTableModel]] = None,
+            self,
+            user: AbstractUser,
+            table: Table,
+            row_ids: List[int],
+            model: Optional[Type[GeneratedTableModel]] = None,
     ) -> TrashedRows:
         """
         Trashes existing rows of the given table based on row_ids.
@@ -2018,7 +1830,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         workspace = table.database.workspace
         CoreHandler().check_permissions(
             user,
-            DeleteDatabaseRowOperationType.type,
+            DeleteDatabaserow_dynamic_table_dynamic_table_dynamic_tableOperationType.type,
             workspace=workspace,
             context=table,
         )
@@ -2062,9 +1874,9 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
         field_cache = FieldCache()
         field_cache.cache_model(model)
         for (
-            dependant_field,
-            dependant_field_type,
-            path_to_starting_table,
+                dependant_field,
+                dependant_field_type,
+                path_to_starting_table,
         ) in FieldDependencyHandler.get_dependant_fields_with_type(
             table.id,
             updated_field_ids,
@@ -2080,7 +1892,7 @@ class RowHandler(metaclass=baserow_trace_methods(tracer)):
             )
         update_collector.apply_updates_and_get_updated_fields(field_cache)
 
-        from baserow.contrib.database.views.handler import ViewHandler
+        from baserow_dynamic_table.views.handler import ViewHandler
 
         ViewHandler().field_value_updated(updated_fields)
 

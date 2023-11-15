@@ -20,24 +20,34 @@ from django.db.models.fields.related import ForeignKey, ManyToManyField
 from django.db.models.functions import Cast
 
 from baserow_dynamic_table.core.registry import (
-
     CustomFieldsInstanceMixin,
     CustomFieldsRegistryMixin,
     Instance,
-
     ModelInstanceMixin,
     ModelRegistryMixin,
     Registry,
 )
-from baserow_dynamic_table.fields.field_sortings import OptionallyAnnotatedOrderBy
+from baserow_dynamic_table.fields.constants import UPSERT_OPTION_DICT_KEY
+from baserow_dynamic_table.fields.field_sortings import (
+    OptionallyAnnotatedOrderBy,
+)
 from baserow_dynamic_table.types import SerializedRowHistoryFieldMetadata
-from .exceptions import FieldTypeAlreadyRegistered, FieldTypeDoesNotExist
+from .deferred_field_fk_updater import DeferredFieldFkUpdater
+from .exceptions import (
+    FieldTypeAlreadyRegistered,
+    FieldTypeDoesNotExist,
+    ReadOnlyFieldHasNoInternalDbValueError,
+)
 from .fields import DurationFieldUsingPostgresFormatting
-from .models import Field, LinkRowField
+from .models import Field, LinkRowField, SelectOption
 
 if TYPE_CHECKING:
-    from baserow_dynamic_table.fields.dependencies.handler import FieldDependants
-    from baserow_dynamic_table.fields.dependencies.types import FieldDependencies
+    from baserow_dynamic_table.fields.dependencies.handler import (
+        FieldDependants,
+    )
+    from baserow_dynamic_table.fields.dependencies.types import (
+        FieldDependencies,
+    )
     from baserow_dynamic_table.fields.dependencies.update_collector import (
         FieldUpdateCollector,
     )
@@ -108,6 +118,13 @@ class FieldType(
     """Indicates whether the field allows inserting/updating row values or if it is
     read only."""
 
+    keep_data_on_duplication = True
+    """
+    Indicates whether the data must be kept when duplicating the field. We typically
+    don't want to do this when the field is read_only, but there are exceptions with
+    the read-only UUID field type for example
+    """
+
     field_data_is_derived_from_attrs = False
     """Set this to True if your field can completely reconstruct it's data just from
     it's field attributes. When set to False the fields data will be backed up when
@@ -161,7 +178,7 @@ class FieldType(
         return True
 
     def get_internal_value_from_db(
-            self, row: "GeneratedTableModel", field_name: str
+        self, row: "GeneratedTableModel", field_name: str
     ) -> Any:
         """
         This method is the counterpart of `prepare_value_for_db`.
@@ -178,10 +195,10 @@ class FieldType(
         return getattr(row, field_name)
 
     def prepare_value_for_db_in_bulk(
-            self,
-            instance: Field,
-            values_by_row: Dict[str, Any],
-            continue_on_error: bool = False,
+        self,
+        instance: Field,
+        values_by_row: Dict[str, Any],
+        continue_on_error: bool = False,
     ) -> Dict[str, Union[Any, Exception]]:
         """
         This method will work for every `prepare_value_for_db` that doesn't
@@ -235,7 +252,7 @@ class FieldType(
         return queryset
 
     def enhance_queryset_in_bulk(
-            self, queryset: QuerySet, field_objects: List[dict]
+        self, queryset: QuerySet, field_objects: List[dict]
     ) -> QuerySet:
         """
         This hook is similar to the `enhance_queryset` method, but combined for all
@@ -258,10 +275,10 @@ class FieldType(
         return queryset
 
     def empty_query(
-            self,
-            field_name: str,
-            model_field: django_models.Field,
-            field: Field,
+        self,
+        field_name: str,
+        model_field: django_models.Field,
+        field: Field,
     ) -> Q:
         """
         Returns a Q filter which performs an empty filter over the
@@ -454,7 +471,7 @@ class FieldType(
         Can return an SQL statement to convert the `p_in` variable to a readable text
         format for the new field.
         This SQL will not be run when converting between two fields of the same
-        baserow type which share the same underlying database column type.
+        baserow_dynamic_table type which share the same underlying database column type.
         If you require this then implement force_same_type_alter_column.
 
         Example: return "p_in = lower(p_in);"
@@ -478,7 +495,7 @@ class FieldType(
         Can return a SQL statement to convert the `p_in` variable from text to a
         desired format for the new field.
         This SQL will not be run when converting between two fields of the same
-        baserow type which share the same underlying database column type.
+        baserow_dynamic_table type which share the same underlying database column type.
         If you require this then implement force_same_type_alter_column.
 
         Example: when a string is converted to a number, to statement could be:
@@ -517,7 +534,7 @@ class FieldType(
         return values
 
     def get_request_kwargs_to_backup(
-            self, field: Field, kwargs: Dict[str, Any]
+        self, field: Field, kwargs: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Returns a dict of attributes that should be backed up when the field is
@@ -565,7 +582,7 @@ class FieldType(
         return values
 
     def before_create(
-            self, table, primary, allowed_field_values, order, user, field_kwargs
+        self, table, primary, allowed_field_values, order, user, field_kwargs
     ):
         """
         This cook is called just before the fields instance is created. Here
@@ -626,15 +643,15 @@ class FieldType(
         """
 
     def before_schema_change(
-            self,
-            from_field,
-            to_field,
-            from_model,
-            to_model,
-            from_model_field,
-            to_model_field,
-            user,
-            to_field_kwargs,
+        self,
+        from_field,
+        to_field,
+        from_model,
+        to_model,
+        from_model_field,
+        to_model_field,
+        user,
+        to_field_kwargs,
     ):
         """
         This hook is called just before the database's schema change. In some cases
@@ -663,16 +680,16 @@ class FieldType(
         """
 
     def after_update(
-            self,
-            from_field,
-            to_field,
-            from_model,
-            to_model,
-            user,
-            connection,
-            altered_column,
-            before,
-            to_field_kwargs,
+        self,
+        from_field,
+        to_field,
+        from_model,
+        to_model,
+        user,
+        connection,
+        altered_column,
+        before,
+        to_field_kwargs,
     ):
         """
         This hook is called right after a field has been updated. In some cases data
@@ -718,7 +735,7 @@ class FieldType(
         """
 
     def get_order(
-            self, field, field_name, order_direction
+        self, field, field_name, order_direction
     ) -> OptionallyAnnotatedOrderBy:
         """
         This hook can be called to generate a different order by expression.
@@ -758,8 +775,8 @@ class FieldType(
         type which have the same database column type.
         You only need to implement this when you have validation and/or data
         manipulation running as part of your alter_column_prepare SQL which must be
-        run even when from_field and to_field are the same Baserow field type and sql
-        column type. If your field has the same baserow type but will convert into
+        run even when from_field and to_field are the same baserow_dynamic_table field type and sql
+        column type. If your field has the same baserow_dynamic_table type but will convert into
         different sql column types then the alter sql will be run automatically and you
         do not need to use this override.
 
@@ -789,7 +806,7 @@ class FieldType(
         return value
 
     def export_serialized(
-            self, field: Field, include_allowed_fields: bool = True
+        self, field: Field, include_allowed_fields: bool = True
     ) -> Dict[str, Any]:
         """
         Exports the field to a serialized dict that can be imported by the
@@ -826,11 +843,73 @@ class FieldType(
 
         return serialized
 
+    def import_serialized(
+        self,
+        table: "Table",
+        serialized_values: Dict[str, Any],
+        import_export_config,
+        id_mapping: Dict[str, Any],
+        deferred_fk_update_collector: DeferredFieldFkUpdater,
+    ) -> Field:
+        """
+        Imported an exported serialized field dict that was exported via the
+        `export_serialized` method.
+
+        :param table: The table where the field should be added to.
+        :param serialized_values: The exported serialized field values that need to
+            be imported.
+        :param id_mapping: The map of exported ids to newly created ids that must be
+            updated when a new instance has been created.
+        :param import_export_config: provides configuration options for the
+            import/export process to customize how it works.
+        :param deferred_fk_update_collector: An object than can be used to defer
+            setting FK's to other fields until after all fields have been created
+            and we know their IDs.
+        :return: The newly created field instance.
+        """
+
+        if "database_fields" not in id_mapping:
+            id_mapping["database_fields"] = {}
+
+        if "database_field_select_options" not in id_mapping:
+            id_mapping["database_field_select_options"] = {}
+
+        serialized_copy = serialized_values.copy()
+        field_id = serialized_copy.pop("id")
+        serialized_copy.pop("type")
+        select_options = (
+            serialized_copy.pop("select_options")
+            if self.can_have_select_options
+            else []
+        )
+        should_create_tsvector_column = not import_export_config.reduce_disk_space_usage
+        field = self.model_class(
+            table=table,
+            tsvector_column_created=should_create_tsvector_column,
+            **serialized_copy,
+        )
+        field.save()
+
+        id_mapping["database_fields"][field_id] = field.id
+
+        if self.can_have_select_options:
+            for select_option in select_options:
+                select_option_copy = select_option.copy()
+                select_option_id = select_option_copy.pop("id")
+                select_option_object = SelectOption.objects.create(
+                    field=field, **select_option_copy
+                )
+                id_mapping["database_field_select_options"][
+                    select_option_id
+                ] = select_option_object.id
+
+        return field
+
     def after_import_serialized(
-            self,
-            field: Field,
-            field_cache: "FieldCache",
-            id_mapping: Dict[str, Any],
+        self,
+        field: Field,
+        field_cache: "FieldCache",
+        id_mapping: Dict[str, Any],
     ):
         """
         Called on fields in dependency order after all fields for an application have
@@ -847,20 +926,20 @@ class FieldType(
 
         FieldDependencyHandler.rebuild_dependencies(field, field_cache)
         for (
-                dependant_field,
-                dependant_field_type,
-                _,
+            dependant_field,
+            dependant_field_type,
+            _,
         ) in field.dependant_fields_with_types(field_cache):
             dependant_field_type.after_import_serialized(
                 dependant_field, field_cache, id_mapping
             )
 
     def after_rows_imported(
-            self,
-            field: Field,
-            update_collector: "FieldUpdateCollector",
-            field_cache: "FieldCache",
-            via_path_to_starting_table: Optional[List[LinkRowField]],
+        self,
+        field: Field,
+        update_collector: "FieldUpdateCollector",
+        field_cache: "FieldCache",
+        via_path_to_starting_table: Optional[List[LinkRowField]],
     ):
         """
         Called on fields in dependency order after all of its rows have been inserted
@@ -876,20 +955,20 @@ class FieldType(
         """
 
         for (
-                dependant_field,
-                dependant_field_type,
-                dependency_path,
+            dependant_field,
+            dependant_field_type,
+            dependency_path,
         ) in field.dependant_fields_with_types(field_cache, via_path_to_starting_table):
             dependant_field_type.after_rows_imported(
                 dependant_field, update_collector, field_cache, dependency_path
             )
 
     def after_rows_created(
-            self,
-            field: Field,
-            rows: List["GeneratedTableModel"],
-            update_collector: "FieldUpdateCollector",
-            field_cache: "FieldCache",
+        self,
+        field: Field,
+        rows: List["GeneratedTableModel"],
+        update_collector: "FieldUpdateCollector",
+        field_cache: "FieldCache",
     ):
         """
         Immediately after a row has been created with a field of this type this
@@ -901,12 +980,12 @@ class FieldType(
         pass
 
     def get_export_serialized_value(
-            self,
-            row: "GeneratedTableModel",
-            field_name: str,
-            cache: Dict[str, Any],
-            files_zip: Optional[ZipFile] = None,
-            storage: Optional[Storage] = None,
+        self,
+        row: "GeneratedTableModel",
+        field_name: str,
+        cache: Dict[str, Any],
+        files_zip: Optional[ZipFile] = None,
+        storage: Optional[Storage] = None,
     ) -> Any:
         """
         Exports the value to a the value of a row to serialized value that is also JSON
@@ -926,14 +1005,14 @@ class FieldType(
         return self.get_internal_value_from_db(row, field_name)
 
     def set_import_serialized_value(
-            self,
-            row: "GeneratedTableModel",
-            field_name: str,
-            value: Any,
-            id_mapping: Dict[str, Any],
-            cache: Dict[str, Any],
-            files_zip: Optional[ZipFile] = None,
-            storage: Optional[Storage] = None,
+        self,
+        row: "GeneratedTableModel",
+        field_name: str,
+        value: Any,
+        id_mapping: Dict[str, Any],
+        cache: Dict[str, Any],
+        files_zip: Optional[ZipFile] = None,
+        storage: Optional[Storage] = None,
     ):
         """
         Sets an imported and serialized value on a row instance.
@@ -956,10 +1035,10 @@ class FieldType(
         setattr(row, field_name, value)
 
     def get_export_value(
-            self, value: Any, field_object: "FieldObject", rich_value: bool = False
+        self, value: Any, field_object: "FieldObject", rich_value: bool = False
     ) -> Any:
         """
-        Should convert this field type's internal baserow value to a form suitable
+        Should convert this field type's internal baserow_dynamic_table value to a form suitable
         for exporting to a standalone file.
 
         :param value: The internal value to convert to a suitable export format
@@ -994,7 +1073,7 @@ class FieldType(
 
     # noinspection PyMethodMayBeStatic
     def get_other_fields_to_trash_restore_always_together(
-            self, field: Field
+        self, field: Field
     ) -> List[Any]:
         """
         When a field of this type is trashed/restored, or the table it is in
@@ -1013,55 +1092,57 @@ class FieldType(
 
         return []
 
-    def to_baserow_formula_type(self, field: Field):
+    def to_baserow_dynamic_table_formula_type(self, field: Field):
         """
-        Should return the Baserow Formula Type to use when referencing a field of this
+        Should return the baserow_dynamic_table Formula Type to use when referencing a field of this
         type in a formula.
 
         :param field: The specific instance of the field that a formula type should
             be created for.
-        :return: The Baserow Formula Type that represents this field in a formula.
+        :return: The baserow_dynamic_table Formula Type that represents this field in a formula.
         """
 
-        from baserow_dynamic_table.formula import BaserowFormulaInvalidType
-
-        return BaserowFormulaInvalidType(
-            f"A field of type {self.type} cannot be referenced in a Baserow formula."
+        from baserow_dynamic_table.formula import (
+            baserow_dynamic_tableFormulaInvalidType,
         )
 
-    def from_baserow_formula_type(self, formula_type) -> Field:
+        return baserow_dynamic_tableFormulaInvalidType(
+            f"A field of type {self.type} cannot be referenced in a baserow_dynamic_table formula."
+        )
+
+    def from_baserow_dynamic_table_formula_type(self, formula_type) -> Field:
         """
-        Should return the Baserow Field Type when converting a formula type back
+        Should return the baserow_dynamic_table Field Type when converting a formula type back
         to a field type.
 
         :param formula_type: The specific instance of a formula type that a field type
             model should be created for.
-        :return: A Baserow Field Type model instance that represents this formula type.
+        :return: A baserow_dynamic_table Field Type model instance that represents this formula type.
         """
 
         raise NotImplementedError(
-            f"A field of type {self.type} cannot be referenced in a Baserow formula."
+            f"A field of type {self.type} cannot be referenced in a baserow_dynamic_table formula."
         )
 
-    def to_baserow_formula_expression(self, field):
+    def to_baserow_dynamic_table_formula_expression(self, field):
         """
-        Should return a Typed Baserow Formula Expression to use when referencing the
+        Should return a Typed baserow_dynamic_table Formula Expression to use when referencing the
         field in a formula.
 
         :param field: The specific instance of the field that a typed formula
             expression should be created for.
-        :return: A typed baserow formula expression which when evaluated represents a
+        :return: A typed baserow_dynamic_table formula expression which when evaluated represents a
             reference to field.
         """
 
         from baserow_dynamic_table.formula import FormulaHandler
 
         return FormulaHandler.get_normal_field_reference_expression(
-            field, self.to_baserow_formula_type(field)
+            field, self.to_baserow_dynamic_table_formula_type(field)
         )
 
     def get_field_dependencies(
-            self, field_instance: Field, field_cache: "FieldCache"
+        self, field_instance: Field, field_cache: "FieldCache"
     ) -> "FieldDependencies":
         """
         Should return a list of field dependencies that field_instance has.
@@ -1084,11 +1165,11 @@ class FieldType(
         return None
 
     def run_periodic_update(
-            self,
-            field: Field,
-            update_collector: "Optional[FieldUpdateCollector]" = None,
-            field_cache: "Optional[FieldCache]" = None,
-            via_path_to_starting_table: Optional[List[LinkRowField]] = None,
+        self,
+        field: Field,
+        update_collector: "Optional[FieldUpdateCollector]" = None,
+        field_cache: "Optional[FieldCache]" = None,
+        via_path_to_starting_table: Optional[List[LinkRowField]] = None,
     ):
         """
         This method is called periodically for all the fields of the same type
@@ -1126,12 +1207,12 @@ class FieldType(
         return False
 
     def row_of_dependency_created(
-            self,
-            field: Field,
-            starting_row: "StartingRowType",
-            update_collector: "FieldUpdateCollector",
-            field_cache: "FieldCache",
-            via_path_to_starting_table: Optional[List[LinkRowField]],
+        self,
+        field: Field,
+        starting_row: "StartingRowType",
+        update_collector: "FieldUpdateCollector",
+        field_cache: "FieldCache",
+        via_path_to_starting_table: Optional[List[LinkRowField]],
     ):
         """
         Called when a row is created in a dependency field (a field that the field
@@ -1160,12 +1241,12 @@ class FieldType(
         )
 
     def row_of_dependency_updated(
-            self,
-            field: Field,
-            starting_row: "StartingRowType",
-            update_collector: "FieldUpdateCollector",
-            field_cache: "FieldCache",
-            via_path_to_starting_table: List["LinkRowField"],
+        self,
+        field: Field,
+        starting_row: "StartingRowType",
+        update_collector: "FieldUpdateCollector",
+        field_cache: "FieldCache",
+        via_path_to_starting_table: List["LinkRowField"],
     ):
         """
         Called when a row or rows are updated in a dependency field (a field that the
@@ -1188,9 +1269,9 @@ class FieldType(
         """
 
         for (
-                dependant_field,
-                dependant_field_type,
-                dependant_path_to_starting_table,
+            dependant_field,
+            dependant_field_type,
+            dependant_path_to_starting_table,
         ) in field.dependant_fields_with_types(field_cache, via_path_to_starting_table):
             dependant_field_type.row_of_dependency_updated(
                 dependant_field,
@@ -1205,12 +1286,12 @@ class FieldType(
         ViewHandler().field_value_updated(field)
 
     def row_of_dependency_deleted(
-            self,
-            field: Field,
-            starting_row: "StartingRowType",
-            update_collector: "FieldUpdateCollector",
-            field_cache: "FieldCache",
-            via_path_to_starting_table: Optional[List[LinkRowField]],
+        self,
+        field: Field,
+        starting_row: "StartingRowType",
+        update_collector: "FieldUpdateCollector",
+        field_cache: "FieldCache",
+        via_path_to_starting_table: Optional[List[LinkRowField]],
     ):
         """
         Called when a row is deleted in a dependency field (a field that the
@@ -1239,12 +1320,12 @@ class FieldType(
         )
 
     def row_of_dependency_moved(
-            self,
-            field: Field,
-            starting_row: "StartingRowType",
-            update_collector: "FieldUpdateCollector",
-            field_cache: "FieldCache",
-            via_path_to_starting_table: Optional[List[LinkRowField]],
+        self,
+        field: Field,
+        starting_row: "StartingRowType",
+        update_collector: "FieldUpdateCollector",
+        field_cache: "FieldCache",
+        via_path_to_starting_table: Optional[List[LinkRowField]],
     ):
         """
         Called when a row is moved in a dependency field (a field that the
@@ -1273,12 +1354,12 @@ class FieldType(
         )
 
     def field_dependency_created(
-            self,
-            field: Field,
-            created_field: Field,
-            update_collector: "FieldUpdateCollector",
-            field_cache: "FieldCache",
-            via_path_to_starting_table: Optional[List[LinkRowField]],
+        self,
+        field: Field,
+        created_field: Field,
+        update_collector: "FieldUpdateCollector",
+        field_cache: "FieldCache",
+        via_path_to_starting_table: Optional[List[LinkRowField]],
     ):
         """
         Called when a field is created which the field parameter depends on.
@@ -1309,13 +1390,13 @@ class FieldType(
         )
 
     def field_dependency_updated(
-            self,
-            field: Field,
-            updated_field: Field,
-            updated_old_field: Field,
-            update_collector: "FieldUpdateCollector",
-            field_cache: "FieldCache",
-            via_path_to_starting_table: Optional[List[LinkRowField]],
+        self,
+        field: Field,
+        updated_field: Field,
+        updated_old_field: Field,
+        update_collector: "FieldUpdateCollector",
+        field_cache: "FieldCache",
+        via_path_to_starting_table: Optional[List[LinkRowField]],
     ):
         """
         Called when a field is updated which the field parameter depends on.
@@ -1343,9 +1424,9 @@ class FieldType(
 
         FieldDependencyHandler.rebuild_dependencies(field, field_cache)
         for (
-                dependant_field,
-                dependant_field_type,
-                dependant_path_to_starting_table,
+            dependant_field,
+            dependant_field_type,
+            dependant_path_to_starting_table,
         ) in field.dependant_fields_with_types(field_cache, via_path_to_starting_table):
             dependant_field_type.field_dependency_updated(
                 dependant_field,
@@ -1361,12 +1442,12 @@ class FieldType(
         ViewHandler().field_updated(field)
 
     def field_dependency_deleted(
-            self,
-            field: Field,
-            deleted_field: Field,
-            update_collector: "FieldUpdateCollector",
-            field_cache: "FieldCache",
-            via_path_to_starting_table: Optional[List[LinkRowField]],
+        self,
+        field: Field,
+        deleted_field: Field,
+        update_collector: "FieldUpdateCollector",
+        field_cache: "FieldCache",
+        via_path_to_starting_table: Optional[List[LinkRowField]],
     ):
         """
         Called when a field is deleted which the field parameter depends on.
@@ -1425,11 +1506,11 @@ class FieldType(
         return self._can_group_by
 
     def before_field_options_update(
-            self,
-            field: Field,
-            to_create: Optional[List[int]] = None,
-            to_update: Optional[List[dict]] = None,
-            to_delete: Optional[List[int]] = None,
+        self,
+        field: Field,
+        to_create: Optional[List[int]] = None,
+        to_update: Optional[List[dict]] = None,
+        to_delete: Optional[List[int]] = None,
     ):
         """
         Called from `FieldHandler.update_field_select_options()` just before
@@ -1445,7 +1526,7 @@ class FieldType(
         """
 
     def should_backup_field_data_for_same_type_update(
-            self, old_field: Field, new_field_attrs: Dict[str, Any]
+        self, old_field: Field, new_field_attrs: Dict[str, Any]
     ) -> bool:
         """
         When a field is updated we backup it's data beforehand so we can undo the
@@ -1467,7 +1548,7 @@ class FieldType(
         return False
 
     def get_dependants_which_will_break_when_field_type_changes(
-            self, field: Field, to_field_type: "FieldType", field_cache: "FieldCache"
+        self, field: Field, to_field_type: "FieldType", field_cache: "FieldCache"
     ) -> "FieldDependants":
         """
         If this field has dependants which will have their FieldDependency deleted
@@ -1506,7 +1587,7 @@ class FieldType(
         return False
 
     def get_permission_error_when_user_changes_field_to_depend_on_forbidden_field(
-            self, user: AbstractUser, changed_field: Field, forbidden_field: Field
+        self, user: AbstractUser, changed_field: Field, forbidden_field: Field
     ) -> Exception:
         """
         Called when the field has been created or changed in a way that resulted in
@@ -1521,10 +1602,10 @@ class FieldType(
         return PermissionError(user)
 
     def serialize_metadata_for_row_history(
-            self,
-            field: Field,
-            row: "GeneratedTableModel",
-            metadata: Optional[SerializedRowHistoryFieldMetadata] = None,
+        self,
+        field: Field,
+        row: "GeneratedTableModel",
+        metadata: Optional[SerializedRowHistoryFieldMetadata] = None,
     ) -> SerializedRowHistoryFieldMetadata:
         """
         Returns a dictionary of metadata that should be stored in the row history
@@ -1560,25 +1641,21 @@ class FieldType(
         return value1 == value2
 
 
-class ReadOnlyFieldHasNoInternalDbValueError(Exception):
-    """
-    Raised when a read only field is trying to get its internal db value.
-    This is because there is no valid value that can be returned which can then pass
-    through "prepare_value_for_db" for a read_only field."
-    """
-
-
 class ReadOnlyFieldType(FieldType):
     read_only = True
+    keep_data_on_duplication = False
 
     def get_internal_value_from_db(
-            self, row: "GeneratedTableModel", field_name: str
+        self, row: "GeneratedTableModel", field_name: str
     ) -> NoReturn:
         """
         Called when a read only field is trying to get its internal db value.
         """
 
-        raise ReadOnlyFieldHasNoInternalDbValueError
+        if not self.keep_data_on_duplication:
+            raise ReadOnlyFieldHasNoInternalDbValueError
+
+        return super().get_internal_value_from_db(row, field_name)
 
     def prepare_value_for_db(self, instance: Field, value: Any) -> NoReturn:
         """
@@ -1591,30 +1668,38 @@ class ReadOnlyFieldType(FieldType):
         )
 
     def get_export_serialized_value(
-            self,
-            row: "GeneratedTableModel",
-            field_name: str,
-            cache: Dict[str, Any],
-            files_zip: Optional[ZipFile] = None,
-            storage: Optional[Storage] = None,
+        self,
+        row: "GeneratedTableModel",
+        field_name: str,
+        cache: Dict[str, Any],
+        files_zip: Optional[ZipFile] = None,
+        storage: Optional[Storage] = None,
     ) -> None:
-        """
-        Since this is a read only field, no value should be prepared for export.
-        """
+        # Since this is a read only field, no value should be prepared for export,
+        # except when we explicitly want to keep the data on duplication like for
+        # example with the UUID field type.
+        if self.keep_data_on_duplication:
+            return super().get_export_serialized_value(
+                row, field_name, cache, files_zip, storage
+            )
 
     def set_import_serialized_value(
-            self,
-            row: "GeneratedTableModel",
-            field_name: str,
-            value: Any,
-            id_mapping: Dict[str, Any],
-            cache: Dict[str, Any],
-            files_zip: Optional[ZipFile] = None,
-            storage: Optional[Storage] = None,
+        self,
+        row: "GeneratedTableModel",
+        field_name: str,
+        value: Any,
+        id_mapping: Dict[str, Any],
+        cache: Dict[str, Any],
+        files_zip: Optional[ZipFile] = None,
+        storage: Optional[Storage] = None,
     ):
-        """
-        Since this is a read only field, no value should be set with import.
-        """
+        # Since this is a read only field, no value be set with export, except when we
+        # explicitly want to keep the data on duplication like for example with the
+        # UUID field type.
+        if self.keep_data_on_duplication:
+            return super().set_import_serialized_value(
+                row, field_name, value, id_mapping, cache, files_zip, storage
+            )
 
 
 class FieldTypeRegistry(
@@ -1624,7 +1709,7 @@ class FieldTypeRegistry(
 ):
     """
     With the field type registry it is possible to register new field types.  A field
-    type is an abstraction made specifically for Baserow. If added to the registry a
+    type is an abstraction made specifically for baserow_dynamic_table. If added to the registry a
     user can create new fields based on this type.
     """
 
@@ -1699,15 +1784,15 @@ class FieldConverter(Instance):
         )
 
     def alter_field(
-            self,
-            from_field,
-            to_field,
-            from_model,
-            to_model,
-            from_model_field,
-            to_model_field,
-            user,
-            connection,
+        self,
+        from_field,
+        to_field,
+        from_model,
+        to_model,
+        from_model_field,
+        to_model_field,
+        user,
+        connection,
     ):
         """
         Should perform the schema change and changes related to the field change. It
@@ -1767,6 +1852,6 @@ class FieldConverterRegistry(Registry):
 
 
 # A default field type registry is created here, this is the one that is used
-# throughout the whole Baserow application to add a new field type.
+# throughout the whole baserow_dynamic_table application to add a new field type.
 field_type_registry: FieldTypeRegistry = FieldTypeRegistry()
 field_converter_registry: FieldConverterRegistry = FieldConverterRegistry()

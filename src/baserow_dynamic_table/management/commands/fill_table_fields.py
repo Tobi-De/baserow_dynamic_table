@@ -1,13 +1,12 @@
 import random
 import sys
 
-from django.core.management.base import BaseCommand
-
 from baserow_dynamic_table.fields.field_helpers import (
     construct_all_possible_field_kwargs,
 )
 from baserow_dynamic_table.fields.handler import FieldHandler
 from baserow_dynamic_table.table.models import Table
+from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
@@ -28,7 +27,7 @@ class Command(BaseCommand):
             "--add-all-fields",
             action="store_true",
             help="Add a column for every field type other than link row to the table "
-            "before populating it.",
+                 "before populating it.",
         )
 
     def handle(self, *args, **options):

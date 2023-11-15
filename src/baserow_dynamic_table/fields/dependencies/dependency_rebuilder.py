@@ -3,7 +3,9 @@ from typing import TYPE_CHECKING, List
 from django.db.models import Q
 
 if TYPE_CHECKING:
-    from baserow_dynamic_table.fields import models as field_models
+    from baserow_dynamic_table.fields import (
+        models as field_models,
+    )
 
 from baserow_dynamic_table.fields.dependencies.circular_reference_checker import (
     will_cause_circular_dep,
@@ -11,8 +13,12 @@ from baserow_dynamic_table.fields.dependencies.circular_reference_checker import
 from baserow_dynamic_table.fields.dependencies.exceptions import (
     CircularFieldDependencyError,
 )
-from baserow_dynamic_table.fields.dependencies.models import FieldDependency
-from baserow_dynamic_table.fields.field_cache import FieldCache
+from baserow_dynamic_table.fields.dependencies.models import (
+    FieldDependency,
+)
+from baserow_dynamic_table.fields.field_cache import (
+    FieldCache,
+)
 
 
 def break_dependencies_for_field(field):
@@ -23,7 +29,9 @@ def break_dependencies_for_field(field):
     :param field: The field whose dependants will have their relationships broken for.
     """
 
-    from baserow_dynamic_table.fields.models import LinkRowField
+    from baserow_dynamic_table.fields.models import (
+        LinkRowField,
+    )
 
     FieldDependency.objects.filter(dependant=field).delete()
     field.dependants.update(dependency=None, broken_reference_field_name=field.name)
@@ -64,8 +72,8 @@ def update_fields_with_broken_references(field: "field_models.Field"):
 
 
 def rebuild_field_dependencies(
-    field_instance,
-    field_cache: FieldCache,
+        field_instance,
+        field_cache: FieldCache,
 ) -> List[FieldDependency]:
     """
     Deletes all existing dependencies a field has and resets them to the ones
@@ -78,7 +86,9 @@ def rebuild_field_dependencies(
     :return: Any new dependencies created by the rebuild.
     """
 
-    from baserow_dynamic_table.fields.registries import field_type_registry
+    from baserow_dynamic_table.fields.registries import (
+        field_type_registry,
+    )
 
     field_type = field_type_registry.get_by_model(field_instance)
     new_dependencies = field_type.get_field_dependencies(field_instance, field_cache)
@@ -103,7 +113,7 @@ def rebuild_field_dependencies(
 
     for dep in new_dependencies_to_create:
         if dep.dependency is not None and will_cause_circular_dep(
-            field_instance, dep.dependency
+                field_instance, dep.dependency
         ):
             raise CircularFieldDependencyError()
 

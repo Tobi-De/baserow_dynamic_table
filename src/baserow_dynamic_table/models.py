@@ -1,5 +1,4 @@
-from baserow_dynamic_table.fields.dependencies.models import FieldDependency
-
+from .fields.dependencies.models import FieldDependency
 from .fields.models import (
     BooleanField,
     DateField,
@@ -13,10 +12,11 @@ from .fields.models import (
     TextField,
     URLField,
 )
-from .table.models import Table
+from .table.models import Table, GeneratedTableModel
 
 __all__ = [
     "Table",
+    "GeneratedTableModel",
     "Field",
     "TextField",
     "NumberField",

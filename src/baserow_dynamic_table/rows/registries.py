@@ -1,19 +1,17 @@
 import abc
 from typing import Any, Dict, Generator, List
 
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.models import Workspace
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.registry import Instance, Registry
+from baserow_dynamic_table.rows.models import RowHistory
 from django.db.models import QuerySet
-
 from rest_framework.fields import Field
-
-from baserow.contrib.database.rows.models import RowHistory
-from baserow.core.models import Workspace
-from baserow.core.registry import Instance, Registry
 
 
 class RowMetadataRegistry(Registry):
     """
     Contains all the types of metadata that can be attached to individual rows in
-    Baserow.
+    baserow_dynamic_table_dynamic_table_dynamic_table.
     """
 
     name = "row_metadata"
@@ -29,7 +27,7 @@ class RowMetadataRegistry(Registry):
         ).get(row_id, {})
 
     def generate_and_merge_metadata_for_rows(
-        self, table, row_ids: Generator[int, None, None]
+            self, table, row_ids: Generator[int, None, None]
     ) -> Dict[int, Dict[str, Any]]:
         """
         For every type of row metadata will generate that type of metadata for each
@@ -71,7 +69,7 @@ class RowMetadataRegistry(Registry):
 class RowMetadataType(Instance, abc.ABC):
     """
     Registering a RowMetadataType allows you to attach extra data on a per row basis
-    to rows returned by the Baserow API. This metadata can then be accessed via views
+    to rows returned by the baserow_dynamic_table_dynamic_table_dynamic_table API. This metadata can then be accessed via views
     in the frontend code. This metadata is not explicitly stored on its own but instead
     should be retrievable in a single quick query run by generate_metadata_for_rows
     given a list of rows to get metadata for.
@@ -119,11 +117,11 @@ class ChangeRowHistoryRegistry(Registry):
 class ChangeRowHistoryType(Instance, abc.ABC):
     @abc.abstractmethod
     def apply_to_list_queryset(
-        self,
-        queryset: QuerySet[RowHistory],
-        workspace: Workspace,
-        table_id: int,
-        row_id: int,
+            self,
+            queryset: QuerySet[RowHistory],
+            workspace: Workspace,
+            table_id: int,
+            row_id: int,
     ) -> QuerySet[RowHistory]:
         """
         By implementing this method you can further filter the

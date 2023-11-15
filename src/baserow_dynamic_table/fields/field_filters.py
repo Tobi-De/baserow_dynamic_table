@@ -6,8 +6,6 @@ from django.db.models import BooleanField, Q
 from django.db.models.expressions import F, Value
 from django.db.models.functions import Mod
 
-from baserow_dynamic_table.core.expressions import FileNameContainsExpr
-
 if TYPE_CHECKING:
     from baserow_dynamic_table.table.models import GeneratedTableModel
 
@@ -69,7 +67,7 @@ class FilterBuilder:
         self._filter_type = filter_type
 
     def filter(
-            self, q: Union[Q, OptionallyAnnotatedQ, "FilterBuilder"]
+        self, q: Union[Q, OptionallyAnnotatedQ, "FilterBuilder"]
     ) -> "FilterBuilder":
         """
         Adds a Q, an AnnotatedQ or another FilterBuilder filter into this
@@ -155,7 +153,7 @@ def filename_contains_filter(field_name, value, _, field) -> OptionallyAnnotated
 
 
 def is_even_and_whole_number_filter(
-        field_name, value, _, field
+    field_name, value, _, field
 ) -> OptionallyAnnotatedQ:
     return AnnotatedQ(
         annotation={f"{field_name}_is_even_and_whole": Mod(F(f"{field_name}"), 2)},
@@ -169,9 +167,9 @@ class FilterGroupNode:
     """
 
     def __init__(
-            self,
-            filter_builder: FilterBuilder,
-            parent: Optional["FilterGroupNode"] = None,
+        self,
+        filter_builder: FilterBuilder,
+        parent: Optional["FilterGroupNode"] = None,
     ):
         self.filter_builder = filter_builder
         self.parent = parent
@@ -212,7 +210,7 @@ class GroupedFiltersAdapter(ABC):
         """
 
 
-class AdvancedFilterBuilder():
+class AdvancedFilterBuilder:
     """
     This utility class constructs a filter builder using an instance of
     GroupedFiltersAdapter. While the FilterBuilder class combines filters using
@@ -265,7 +263,7 @@ class AdvancedFilterBuilder():
         return self._construct_filter_builder_from_tree(root_node)
 
     def _construct_filter_builder_from_tree(
-            self, node: FilterGroupNode
+        self, node: FilterGroupNode
     ) -> FilterBuilder:
         """
         Constructs a filter builder from a tree of FilterGroupNodes recursively.

@@ -1,10 +1,9 @@
-from django.core.management.base import BaseCommand
-
 from baserow_dynamic_table.formula.migrations.handler import (
     DEFAULT_FORMULA_MIGRATION_BATCH_SIZE,
     FormulaMigrationHandler,
 )
 from baserow_dynamic_table.table.cache import clear_generated_model_cache
+from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
@@ -21,14 +20,14 @@ class Command(BaseCommand):
             "--dont-clear-model-cache",
             action="store_true",
             help="By default this command first clears the model cache. If you have"
-            " want to disable this provide this flag.",
+                 " want to disable this provide this flag.",
         )
         parser.add_argument(
             "--batch-size",
             type=int,
             default=DEFAULT_FORMULA_MIGRATION_BATCH_SIZE,
             help="Formulas will be updated in batches of size according to this "
-            "parameter.",
+                 "parameter.",
         )
 
     def handle(self, *args, **options):

@@ -1,9 +1,10 @@
-from django.core.management.base import BaseCommand
-from django.db import transaction
-
-from baserow_dynamic_table.fields.dependencies.handler import FieldDependencyHandler
+from baserow_dynamic_table.fields.dependencies.handler import (
+    FieldDependencyHandler,
+)
 from baserow_dynamic_table.fields.field_cache import FieldCache
 from baserow_dynamic_table.fields.models import FormulaField
+from django.core.management.base import BaseCommand
+from django.db import transaction
 
 
 class Command(BaseCommand):

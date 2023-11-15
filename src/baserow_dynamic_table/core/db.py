@@ -26,6 +26,8 @@ from django.db.transaction import Atomic, get_connection
 from loguru import logger
 from psycopg2 import sql
 
+from .utils import find_intermediate_order
+
 ModelInstance = TypeVar("ModelInstance", bound=object)
 
 
@@ -337,10 +339,10 @@ def recalculate_full_orders(
 @cache
 def get_collation_name() -> Optional[str]:
     """
-    Performs a simple check to determine if expected Baserow collation
+    Performs a simple check to determine if expected baserow_dynamic_table_dynamic_table_dynamic_table collation
     can be used by sourcing pg_collation table.
 
-    Returns the name of the Baserow collation if it
+    Returns the name of the baserow_dynamic_table_dynamic_table_dynamic_table collation if it
     can be used, None otherwise.
     """
 
@@ -364,7 +366,7 @@ def get_collation_name() -> Optional[str]:
 
 def collate_expression(expression):
     """
-    If default Baserow collation can be used
+    If default baserow_dynamic_table_dynamic_table_dynamic_table collation can be used
     the provided expression will be collated.
     If not, the original expression is returned.
     """

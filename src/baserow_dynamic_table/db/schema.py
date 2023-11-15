@@ -24,12 +24,12 @@ class PostgresqlLenientDatabaseSchemaEditor:
     )
 
     def __init__(
-        self,
-        *args,
-        alter_column_prepare_old_value="",
-        alter_column_prepare_new_value="",
-        force_alter_column=False,
-        **kwargs,
+            self,
+            *args,
+            alter_column_prepare_old_value="",
+            alter_column_prepare_new_value="",
+            force_alter_column=False,
+            **kwargs,
     ):
         self.alter_column_prepare_old_value = alter_column_prepare_old_value
         self.alter_column_prepare_new_value = alter_column_prepare_new_value
@@ -37,15 +37,15 @@ class PostgresqlLenientDatabaseSchemaEditor:
         super().__init__(*args, **kwargs)
 
     def _alter_field(
-        self,
-        model,
-        old_field,
-        new_field,
-        old_type,
-        new_type,
-        old_db_params,
-        new_db_params,
-        strict=False,
+            self,
+            model,
+            old_field,
+            new_field,
+            old_type,
+            new_type,
+            old_db_params,
+            new_db_params,
+            strict=False,
     ):
         if self.force_alter_column:
             old_type = f"{old_type}_forced"
@@ -131,11 +131,11 @@ class PostgresqlLenientDatabaseSchemaEditor:
                         % {
                             "table": self.quote_name(table),
                             "changes": self.sql_alter_column_default
-                            % {
-                                "column": self.quote_name(column),
-                                "default": "nextval('%s')"
-                                % self.quote_name(sequence_name),
-                            },
+                                       % {
+                                           "column": self.quote_name(column),
+                                           "default": "nextval('%s')"
+                                                      % self.quote_name(sequence_name),
+                                       },
                         },
                         [],
                     ),
@@ -160,8 +160,8 @@ class PostgresqlLenientDatabaseSchemaEditor:
                 ],
             )
         elif (
-            old_field.db_parameters(connection=self.connection)["type"]
-            in serial_fields_map
+                old_field.db_parameters(connection=self.connection)["type"]
+                in serial_fields_map
         ):
             # Drop the sequence if migrating away from AutoField.
             column = strip_quotes(new_field.column)
@@ -191,9 +191,9 @@ class PostgresqlLenientDatabaseSchemaEditor:
 
 @contextlib.contextmanager
 def lenient_schema_editor(
-    alter_column_prepare_old_value=None,
-    alter_column_prepare_new_value=None,
-    force_alter_column=False,
+        alter_column_prepare_old_value=None,
+        alter_column_prepare_new_value=None,
+        force_alter_column=False,
 ):
     """
     A contextual function that yields a modified version of the connection's schema
@@ -225,9 +225,9 @@ def lenient_schema_editor(
         kwargs["alter_column_prepare_new_value"] = alter_column_prepare_new_value
 
     with safe_django_schema_editor(
-        name="LenientDatabaseSchemaEditor",
-        classes=[PostgresqlLenientDatabaseSchemaEditor],
-        **kwargs,
+            name="LenientDatabaseSchemaEditor",
+            classes=[PostgresqlLenientDatabaseSchemaEditor],
+            **kwargs,
     ) as schema_editor:
         yield schema_editor
 
@@ -252,7 +252,7 @@ def optional_atomic(atomic=True):
         yield
 
 
-class SafeBaserowPostgresSchemaEditor:
+class Safebaserow_dynamic_table_dynamic_table_dynamic_tablePostgresSchemaEditor:
     """
     Overrides the create/delete_model methods to work with our link_row fields which
     link back to the same table.
@@ -273,7 +273,7 @@ class SafeBaserowPostgresSchemaEditor:
         self.create_model_tracking_created_m2ms(model)
 
     def create_model_tracking_created_m2ms(
-        self, model, already_created_through_table_names: Optional[Set[str]] = None
+            self, model, already_created_through_table_names: Optional[Set[str]] = None
     ):
         sql, params = self.table_sql(model)
         # Prevent using [] as params, in the case a literal '%' is used in the
@@ -288,8 +288,8 @@ class SafeBaserowPostgresSchemaEditor:
             remote_through = field.remote_field.through
             db_table = remote_through._meta.db_table
             if (
-                field.remote_field.through._meta.auto_created
-                and db_table not in already_created_through_table_names
+                    field.remote_field.through._meta.auto_created
+                    and db_table not in already_created_through_table_names
             ):
                 self.create_model(remote_through)
                 already_created_through_table_names.add(db_table)
@@ -313,8 +313,8 @@ class SafeBaserowPostgresSchemaEditor:
             remote_through = field.remote_field.through
             db_table = remote_through._meta.db_table
             if (
-                remote_through._meta.auto_created
-                and db_table not in already_deleted_through_table_name
+                    remote_through._meta.auto_created
+                    and db_table not in already_deleted_through_table_name
             ):
                 self.delete_model(field.remote_field.through)
                 already_deleted_through_table_name.add(db_table)
@@ -330,7 +330,7 @@ class SafeBaserowPostgresSchemaEditor:
 
         for sql in list(self.deferred_sql):
             if isinstance(sql, Statement) and sql.references_table(
-                model._meta.db_table
+                    model._meta.db_table
             ):
                 self.deferred_sql.remove(sql)
 
@@ -339,7 +339,7 @@ class SafeBaserowPostgresSchemaEditor:
 def safe_django_schema_editor(atomic=True, name=None, classes=None, **kwargs):
     """
     This is a customized version of the django provided Postgres
-    BaseDatabaseSchemaEditor. Inside of Baserow this schema editor should always be
+    BaseDatabaseSchemaEditor. Inside of baserow_dynamic_table_dynamic_table_dynamic_table this schema editor should always be
     used to prevent the following two bugs:
 
     1. The django.db.backends.base.schema.BaseDatabaseSchemaEditor.__exit__ has a bug
@@ -347,29 +347,33 @@ def safe_django_schema_editor(atomic=True, name=None, classes=None, **kwargs):
     causes an exception. Instead we disable its internal atomic wrapper which has
     this bug and wrap it ourselves properly and safely.
     2. Our implementation of link_row fields which link back to the same table have to
-    add two separate ManyToMany model fields to the Generated baserow django models.
+    add two separate ManyToMany model fields to the Generated baserow_dynamic_table_dynamic_table_dynamic_table django models.
     Because of this the normal shcema_editor.delete_model/create_model functions crash
     as they will try to create or delete the through m2m table twice. This safe
     schema editor overrides these two methods to only create/delete the m2m table once.
     """
 
     if name is None:
-        name = "BaserowSafeDjangoPostgresSchemaEditor"
+        name = "baserow_dynamic_table_dynamic_table_dynamic_tableSafeDjangoPostgresSchemaEditor"
 
     if classes is None:
         classes = []
 
-    classes.append(SafeBaserowPostgresSchemaEditor)
+    classes.append(Safebaserow_dynamic_table_dynamic_table_dynamic_tablePostgresSchemaEditor)
 
     regular_schema_editor = connection.SchemaEditorClass
 
-    if not issubclass(regular_schema_editor, SafeBaserowPostgresSchemaEditor):
+    if not issubclass(
+            regular_schema_editor, Safebaserow_dynamic_table_dynamic_table_dynamic_tablePostgresSchemaEditor
+    ):
         # Only override the connections schema editor if we haven't already done it
         # in an outer safe schema editor context.
-        BaserowSafeDjangoPostgresSchemaEditor = _build_schema_editor_class(
-            name, classes
+        baserow_dynamic_table_dynamic_table_dynamic_tableSafeDjangoPostgresSchemaEditor = (
+            _build_schema_editor_class(name, classes)
         )
-        connection.SchemaEditorClass = BaserowSafeDjangoPostgresSchemaEditor
+        connection.SchemaEditorClass = (
+            baserow_dynamic_table_dynamic_table_dynamic_tableSafeDjangoPostgresSchemaEditor
+        )
 
     kwargs.setdefault("connection", connection)
 

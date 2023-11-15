@@ -10,20 +10,27 @@ from baserow_dynamic_table.core.mixins import (
     HierarchicalModelMixin,
     OrderableMixin,
     PolymorphicContentTypeMixin,
+    TrashableModelMixin,
 )
+from baserow_dynamic_table.core.utils import remove_special_characters, to_snake_case
 from baserow_dynamic_table.fields.mixins import (
     BaseDateMixin,
 )
-from baserow_dynamic_table.table.cache import invalidate_table_in_model_cache
-from .fields import SerialField
-from ..core.utils import remove_special_characters, to_snake_case
-from ..table.constants import (
+from baserow_dynamic_table.table.cache import (
+    invalidate_table_in_model_cache,
+)
+from baserow_dynamic_table.table.constants import (
     LINK_ROW_THROUGH_TABLE_PREFIX,
     MULTIPLE_SELECT_THROUGH_TABLE_PREFIX,
+    get_tsv_vector_field_name,
 )
+from .fields import SerialField
+from ..mixins import ParentFieldTrashableModelMixin
 
 if typing.TYPE_CHECKING:
-    from baserow_dynamic_table.fields.dependencies.handler import FieldDependants
+    from baserow_dynamic_table.fields.dependencies.handler import (
+        FieldDependants,
+    )
 
 NUMBER_MAX_DECIMAL_PLACES = 10
 
@@ -56,13 +63,14 @@ def get_default_field_content_type():
 
 class Field(
     HierarchicalModelMixin,
+    TrashableModelMixin,
     CreatedAndUpdatedOnMixin,
     OrderableMixin,
     PolymorphicContentTypeMixin,
     models.Model,
 ):
     """
-    Baserow base field model. All custom fields should inherit from this class.
+    baserow_dynamic_table base field model. All custom fields should inherit from this class.
     Because each field type can have custom settings, for example precision for a number
     field, values for an option field or checkbox style for a boolean field we need a
     polymorphic content type to store these settings in another table.
@@ -89,6 +97,13 @@ class Field(
         through_fields=("dependant", "dependency"),
         symmetrical=False,
     )
+    tsvector_column_created = models.BooleanField(
+        default=False,
+        help_text="Indicates whether a `tsvector` has been created for this field yet. "
+        "This value will be False for fields created before the full text "
+        "search release which haven't been lazily migrated yet. Or for "
+        "users who have turned off full text search entirely.",
+    )
 
     class Meta:
         ordering = (
@@ -111,6 +126,14 @@ class Field(
     @property
     def db_column(self):
         return f"field_{self.id}"
+
+    @property
+    def tsv_db_column(self):
+        return get_tsv_vector_field_name(self.id)
+
+    @property
+    def tsv_index_name(self):
+        return f"tbl_tsv_{self.id}_idx"
 
     @property
     def model_attribute_name(self):
@@ -158,7 +181,9 @@ class Field(
         return save
 
 
-class AbstractSelectOption(HierarchicalModelMixin, models.Model):
+class AbstractSelectOption(
+    HierarchicalModelMixin, ParentFieldTrashableModelMixin, models.Model
+):
     value = models.CharField(max_length=255, blank=True)
     color = models.CharField(max_length=255, blank=True)
     order = models.PositiveIntegerField()
@@ -300,8 +325,7 @@ class LinkRowField(Field):
         null=True,
         blank=True,
     )
-    # link_row_relation_id = SerialField(null=True, unique=False)
-    link_row_relation_id = SerialField(unique=False)
+    link_row_relation_id = SerialField(null=True, unique=False)
 
     @property
     def through_table_name(self):
@@ -360,6 +384,10 @@ class MultipleSelectField(Field):
 
 
 class PhoneNumberField(Field):
+    pass
+
+
+class UUIDField(Field):
     pass
 
 

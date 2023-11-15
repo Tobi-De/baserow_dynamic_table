@@ -1,12 +1,12 @@
 import sys
 
-from django.db import transaction
-
-from tqdm import tqdm
-
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.management.commands.base_confirmation import (
+    BaseConfirmationCommand,
+)
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.trash.handler import TrashHandler
 from baserow_dynamic_table.models import Database
-from baserow.core.management.commands.base_confirmation import BaseConfirmationCommand
-from baserow.core.trash.handler import TrashHandler
+from django.db import transaction
+from tqdm import tqdm
 
 
 class Command(BaseConfirmationCommand):
@@ -56,7 +56,7 @@ class Command(BaseConfirmationCommand):
             sys.exit(1)
 
         for table in tqdm(
-            tables, desc=f"Deleting {len(tables)} tables in database {database.name}."
+                tables, desc=f"Deleting {len(tables)} tables in database {database.name}."
         ):
             with transaction.atomic():
                 TrashHandler.permanently_delete(table)

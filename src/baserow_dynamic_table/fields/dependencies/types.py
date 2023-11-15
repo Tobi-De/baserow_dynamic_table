@@ -1,6 +1,8 @@
 from typing import List, Tuple
 
-from baserow_dynamic_table.fields.dependencies.models import FieldDependency
+from baserow_dynamic_table.fields.dependencies.models import (
+    FieldDependency,
+)
 
 ThroughFieldName = str
 TargetFieldName = str

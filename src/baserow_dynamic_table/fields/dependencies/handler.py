@@ -9,7 +9,10 @@ from baserow_dynamic_table.fields.dependencies.dependency_rebuilder import (
 )
 from baserow_dynamic_table.fields.field_cache import FieldCache
 from baserow_dynamic_table.fields.models import Field, LinkRowField
-from baserow_dynamic_table.fields.registries import FieldType, field_type_registry
+from baserow_dynamic_table.fields.registries import (
+    FieldType,
+    field_type_registry,
+)
 from .models import FieldDependency
 
 FieldDependants = List[Tuple[Field, FieldType, List[LinkRowField]]]

@@ -1,16 +1,18 @@
+from baserow_dynamic_table.core.db import (
+    IsolationLevel,
+    transaction_atomic,
+)
 from django.db.transaction import Atomic
 from psycopg2 import sql
-
-from baserow_dynamic_table.core.db import IsolationLevel, transaction_atomic
 
 
 def read_repeatable_single_database_atomic_transaction(
         database_id: int,
 ) -> Atomic:
     """
-    If you want to safely read the contents of a Baserow database inside of a single
+    If you want to safely read the contents of a baserow_dynamic_table_dynamic_table_dynamic_table database inside of a single
     transaction and be guaranteed to see a single snapshot of the metadata and user
-    data contained within the Baserow db tables then use this atomic transaction context
+    data contained within the baserow_dynamic_table_dynamic_table_dynamic_table db tables then use this atomic transaction context
     manager.
 
     This manager does two things to ensure this:
@@ -21,7 +23,7 @@ def read_repeatable_single_database_atomic_transaction(
        and table metadata rows in this first SELECT statement FOR KEY SHARE. This means
        once the transaction has obtained this lock it can proceed safely without
        having to worry about fields being updated during the length of the transaction.
-       We need to lock these rows as otherwise Baserow's various endpoints can
+       We need to lock these rows as otherwise baserow_dynamic_table_dynamic_table_dynamic_table's various endpoints can
        execute ALTER TABLE and DROP TABLE statements which are not MVCC safe and will
        break the snapshot obtained by REPEATABLE READ, see
        https://www.postgresql.org/docs/current/mvcc-caveats.html for more info.
@@ -56,7 +58,7 @@ def read_committed_single_table_transaction(
         table_id: int,
 ) -> Atomic:
     """
-    If you want to safely read the contents of a Baserow table inside of a single
+    If you want to safely read the contents of a baserow_dynamic_table_dynamic_table_dynamic_table table inside of a single
     transaction and be guaranteed that the fields wont change during the transaction no
     unsafe MVCC operations can occur during the transaction then use this context
     manager.
@@ -66,7 +68,7 @@ def read_committed_single_table_transaction(
        and the table's metadata row in this first SELECT statement FOR KEY SHARE. This
        means once the transaction has obtained this lock it can proceed safely without
        having to worry about fields being updated during the length of the transaction.
-       We need to lock these rows as otherwise Baserow's various endpoints can
+       We need to lock these rows as otherwise baserow_dynamic_table_dynamic_table_dynamic_table's various endpoints can
        execute ALTER TABLE and DROP TABLE statements which are not MVCC safe and can
        cause
        https://www.postgresql.org/docs/current/mvcc-caveats.html for more info.
@@ -100,7 +102,7 @@ def read_repeatable_read_single_table_transaction(
         table_id: int,
 ) -> Atomic:
     """
-    If you want to safely read the contents of a Baserow table inside of a single
+    If you want to safely read the contents of a baserow_dynamic_table_dynamic_table_dynamic_table table inside of a single
     transaction and be guaranteed that the fields wont change during the transaction no
     unsafe MVCC operations can occur during the transaction then use this context
     manager.
@@ -113,7 +115,7 @@ def read_repeatable_read_single_table_transaction(
        and the table's metadata row in this first SELECT statement FOR SHARE. This
        means once the transaction has obtained this lock it can proceed safely without
        having to worry about fields being updated during the length of the transaction.
-       We need to lock these rows as otherwise Baserow's various endpoints can
+       We need to lock these rows as otherwise baserow_dynamic_table_dynamic_table_dynamic_table's various endpoints can
        execute ALTER TABLE and DROP TABLE statements which are not MVCC safe and can
        cause
        https://www.postgresql.org/docs/current/mvcc-caveats.html for more info.

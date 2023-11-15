@@ -4,12 +4,19 @@ from typing import Any, Dict, List, NewType, Optional, Tuple, cast
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import DatabaseError, ProgrammingError
-from django.db.models import Q, QuerySet, Sum
-from django.utils import timezone, translation
+from django.db.models import QuerySet, Sum
+from django.utils import timezone
 from django.utils.translation import gettext as _
+from loguru import logger
 
+from baserow_dynamic_table.core.utils import (
+    Progress,
+    find_unused_name,
+)
 from baserow_dynamic_table.db.schema import safe_django_schema_editor
-from baserow_dynamic_table.fields.dependencies.models import FieldDependency
+from baserow_dynamic_table.fields.constants import (
+    RESERVED_BASEROW_FIELD_NAMES,
+)
 from baserow_dynamic_table.fields.exceptions import (
     InvalidBaserowFieldName,
     MaxFieldLimitExceeded,
@@ -17,7 +24,11 @@ from baserow_dynamic_table.fields.exceptions import (
     ReservedBaserowFieldNameException,
 )
 from baserow_dynamic_table.fields.handler import FieldHandler
+from baserow_dynamic_table.fields.models import Field
 from baserow_dynamic_table.fields.registries import field_type_registry
+from baserow_dynamic_table.rows.handler import RowHandler
+from baserow_dynamic_table.trash.handler import TrashHandler
+from .constants import ROW_NEEDS_BACKGROUND_UPDATE_COLUMN_NAME
 from .exceptions import (
     FailedToLockTableDueToConflict,
     InitialTableDataDuplicateName,
@@ -26,7 +37,7 @@ from .exceptions import (
     TableDoesNotExist,
     TableNotInDatabase,
 )
-from .models import Table
+from .models import Table, get_row_needs_background_update_index
 
 BATCH_SIZE = 1024
 
@@ -53,6 +64,9 @@ class TableHandler:
         try:
             table = base_queryset.select_related("database__workspace").get(id=table_id)
         except Table.DoesNotExist:
+            raise TableDoesNotExist(f"The table with id {table_id} does not exist.")
+
+        if TrashHandler.item_has_a_trashed_parent(table):
             raise TableDoesNotExist(f"The table with id {table_id} does not exist.")
 
         return table
@@ -103,6 +117,7 @@ class TableHandler:
             data: Optional[List[List[Any]]] = None,
             first_row_header: bool = True,
             fill_example: bool = False,
+            progress: Optional[Progress] = None,
     ):
         """
         Creates a new table from optionally provided data. If no data is specified,
@@ -123,7 +138,6 @@ class TableHandler:
             of the task.
         :return: The created table and the error report.
         """
-
         if data is not None:
             (
                 fields,
@@ -132,6 +146,7 @@ class TableHandler:
                 data, first_row_header=first_row_header
             )
         else:
+
             if fill_example:
                 fields, data = self.get_example_table_field_and_data()
             else:
@@ -167,7 +182,8 @@ class TableHandler:
         last_order = Table.get_last_order()
         table = Table.objects.create(
             order=last_order,
-            name=name
+            name=name,
+            needs_background_update_column_added=True,
         )
 
         # Let's create the fields before creating the model so that the whole
@@ -183,6 +199,7 @@ class TableHandler:
                 order=index,
                 primary=index == 0,
                 name=name,
+                tsvector_column_created=table.tsvectors_are_supported,
                 **field_config,
             )
             if field_options:
@@ -210,7 +227,7 @@ class TableHandler:
         :raises MaxFieldNameLengthExceeded: When the provided name is too long.
         :raises InitialTableDataDuplicateName: When duplicates exit in field names.
         :raises ReservedBaserowFieldNameException: When the field name is reserved by
-            Baserow.
+            baserow_dynamic_table.
         :raises InvalidBaserowFieldName: When the field name is invalid (empty).
         :return: A list containing the field names with a type and a list containing all
             the rows.
@@ -255,7 +272,10 @@ class TableHandler:
         if len(long_field_names) > 0:
             raise MaxFieldNameLengthExceeded(max_field_name_length)
 
-        if len(field_name_set.intersection(RESERVED_BASEROW_FIELD_NAMES)) > 0:
+        if (
+                len(field_name_set.intersection(RESERVED_BASEROW_FIELD_NAMES))
+                > 0
+        ):
             raise ReservedBaserowFieldNameException()
 
         if "" in field_name_set:
@@ -372,7 +392,9 @@ class TableHandler:
             them.
         """
 
-        from baserow_dynamic_table.fields.field_types import LinkRowFieldType
+        from baserow_dynamic_table.fields.field_types import (
+            LinkRowFieldType,
+        )
 
         external_fields = []
         for serialized_field in serialized_table["fields"]:
@@ -437,16 +459,7 @@ class TableHandler:
         if not isinstance(table, Table):
             raise ValueError("The table is not an instance of Table")
 
-        CoreHandler().check_permissions(
-            user,
-            DeleteDatabaseTableOperationType.type,
-            workspace=table.database.workspace,
-            context=table,
-        )
-
         TrashHandler.trash(user, table.database.workspace, table.database, table)
-
-        table_deleted.send(self, table_id=table.id, table=table, user=user)
 
     @classmethod
     def count_rows(cls) -> int:
@@ -505,3 +518,25 @@ class TableHandler:
                 )["row_count__sum"]
                 or 0
         )
+
+    def create_needs_background_update_field(self, table: "Table") -> None:
+        """
+        Responsible for creating the `ROW_NEEDS_BACKGROUND_UPDATES_RUN_COLUMN_NAME` and
+        fields on the `Table`.
+        """
+
+        if table.needs_background_update_column_added:
+            return
+
+        # Prepare a fresh model we can use to create the columns.
+        table.needs_background_update_column_added = True
+        model = table.get_model()
+
+        with safe_django_schema_editor(atomic=False) as schema_editor:
+            needs_background_update_field = model._meta.get_field(
+                ROW_NEEDS_BACKGROUND_UPDATE_COLUMN_NAME
+            )
+            schema_editor.add_field(model, needs_background_update_field)
+            schema_editor.add_index(model, get_row_needs_background_update_index(table))
+
+        table.save(update_fields=("needs_background_update_column_added",))

@@ -4,10 +4,10 @@ from baserow_dynamic_table.fields.registries import field_type_registry
 
 
 def construct_all_possible_field_kwargs(
-    table, link_table, decimal_link_table, file_link_table
+        table, link_table, decimal_link_table, file_link_table
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Some baserow field types have multiple different 'modes' which result in
+    Some baserow_dynamic_table_dynamic_table_dynamic_table field types have multiple different 'modes' which result in
     different database columns and modes of operation being
     created. This function creates a dictionary of field type to a list of
     kwarg dicts, one for each interesting possible 'subtype' of the field.
@@ -169,7 +169,7 @@ def construct_all_possible_field_kwargs(
         ],
         "phone_number": [{"name": "phone_number"}],
         "formula": [
-            # Make one for each Baserow formula type!
+            # Make one for each baserow_dynamic_table_dynamic_table_dynamic_table formula type!
             {"name": "formula_text", "formula": "CONCAT('test ', UPPER('formula'))"},
             {"name": "formula_int", "formula": "1"},
             {"name": "formula_bool", "formula": "true"},
@@ -206,6 +206,7 @@ def construct_all_possible_field_kwargs(
                 "target_field_name": "text_field",
             }
         ],
+        "uuid": [{"name": "uuid"}],
     }
     # If you have added a new field please add an entry into the dict above with any
     # test worthy combinations of kwargs

@@ -1,21 +1,22 @@
 from datetime import datetime
 from typing import Any, Dict, List, NamedTuple, NewType, Optional
 
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.action.signals import ActionCommandType, action_done
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.models import Workspace
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.telemetry.utils import \
+    baserow_dynamic_table_dynamic_table_dynamic_table_trace
+from baserow_dynamic_table.fields.registries import field_type_registry
+from baserow_dynamic_table.rows.actions import UpdateRowsActionType
+from baserow_dynamic_table.rows.models import RowHistory
+from baserow_dynamic_table.rows.registries import (
+    change_row_history_registry,
+)
+from baserow_dynamic_table.rows.signals import rows_history_updated
 from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser
 from django.db.models import QuerySet
 from django.dispatch import receiver
-
 from opentelemetry import trace
-
-from baserow.contrib.database.fields.registries import field_type_registry
-from baserow.contrib.database.rows.actions import UpdateRowsActionType
-from baserow.contrib.database.rows.models import RowHistory
-from baserow.contrib.database.rows.registries import change_row_history_registry
-from baserow.contrib.database.rows.signals import rows_history_updated
-from baserow.core.action.signals import ActionCommandType, action_done
-from baserow.core.models import Workspace
-from baserow.core.telemetry.utils import baserow_trace
 
 tracer = trace.get_tracer(__name__)
 
@@ -37,17 +38,17 @@ class RowChangeDiff(NamedTuple):
 class RowHistoryHandler:
     @classmethod
     def _construct_entry_from_action_and_diff(
-        cls,
-        user,
-        table_id,
-        row_id,
-        field_names,
-        row_fields_metadata,
-        action_type,
-        action_uuid,
-        action_timestamp,
-        action_command_type,
-        diff,
+            cls,
+            user,
+            table_id,
+            row_id,
+            field_names,
+            row_fields_metadata,
+            action_type,
+            action_uuid,
+            action_timestamp,
+            action_command_type,
+            diff,
     ):
         return RowHistory(
             user_id=user.id,
@@ -66,10 +67,10 @@ class RowHistoryHandler:
 
     @classmethod
     def _extract_row_diff(
-        cls,
-        before_values: Dict[str, Any],
-        after_values: Dict[str, Any],
-        fields_metadata,
+            cls,
+            before_values: Dict[str, Any],
+            after_values: Dict[str, Any],
+            fields_metadata,
     ) -> Optional[RowChangeDiff]:
         """
         Extracts the fields that have changed between the before and after values of a
@@ -85,8 +86,8 @@ class RowHistoryHandler:
             k
             for k, v in after_values.items()
             if k != "id"
-            and k in before_values
-            and not are_equal(k, v, before_values[k])
+               and k in before_values
+               and not are_equal(k, v, before_values[k])
         }
         if not changed_fields:
             return None
@@ -98,8 +99,8 @@ class RowHistoryHandler:
     @classmethod
     def _raise_if_ids_mismatch(cls, before_values, after_values, fields_metadata):
         if (
-            before_values["id"] != after_values["id"]
-            or before_values["id"] != fields_metadata["id"]
+                before_values["id"] != after_values["id"]
+                or before_values["id"] != fields_metadata["id"]
         ):
             raise ValueError(
                 f"Row ID mismatch between before values, after values and metadata. It should be: "
@@ -109,14 +110,14 @@ class RowHistoryHandler:
             )
 
     @classmethod
-    @baserow_trace(tracer)
+    @baserow_dynamic_table_dynamic_table_dynamic_table_trace(tracer)
     def record_history_from_update_rows_action(
-        cls,
-        user: AbstractBaseUser,
-        action_uuid: str,
-        action_params: Dict[str, Any],
-        action_timestamp: datetime,
-        action_command_type: ActionCommandType,
+            cls,
+            user: AbstractBaseUser,
+            action_uuid: str,
+            action_params: Dict[str, Any],
+            action_timestamp: datetime,
+            action_command_type: ActionCommandType,
     ):
         params = UpdateRowsActionType.serialized_to_params(action_params)
         after_values = params.row_values
@@ -166,9 +167,9 @@ class RowHistoryHandler:
             )
 
     @classmethod
-    @baserow_trace(tracer)
+    @baserow_dynamic_table_dynamic_table_dynamic_table_trace(tracer)
     def list_row_history(
-        cls, workspace: Workspace, table_id: int, row_id: int
+            cls, workspace: Workspace, table_id: int, row_id: int
     ) -> QuerySet[RowHistory]:
         """
         Returns queryset of row history entries for the provided
@@ -205,17 +206,17 @@ ROW_HISTORY_ACTIONS = {
 
 @receiver(action_done)
 def on_action_done_update_row_history(
-    sender,
-    user,
-    action_type,
-    action_params,
-    action_timestamp,
-    action_command_type,
-    workspace,
-    action_uuid,
-    **kwargs,
+        sender,
+        user,
+        action_type,
+        action_params,
+        action_timestamp,
+        action_command_type,
+        workspace,
+        action_uuid,
+        **kwargs,
 ):
-    if settings.BASEROW_ROW_HISTORY_RETENTION_DAYS == 0:
+    if settings.baserow_dynamic_table_dynamic_table_dynamic_table_ROW_HISTORY_RETENTION_DAYS == 0:
         return
 
     if action_type and action_type.type in ROW_HISTORY_ACTIONS:

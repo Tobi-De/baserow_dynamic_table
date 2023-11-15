@@ -1,14 +1,12 @@
 import sys
 
-from django.core.management.base import BaseCommand
-
-from tqdm import tqdm
-
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.models import Workspace
 from baserow_dynamic_table.models import Database
 from baserow_dynamic_table.table.models import Table
 from baserow_dynamic_table.views.handler import ViewIndexingHandler
 from baserow_dynamic_table.views.models import View
-from baserow.core.models import Workspace
+from django.core.management.base import BaseCommand
+from tqdm import tqdm
 
 
 class Command(BaseCommand):

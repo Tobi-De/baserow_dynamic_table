@@ -6,15 +6,12 @@ from decimal import Decimal
 from itertools import cycle
 from random import randint, randrange, sample
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
-from zipfile import ZipFile
 
 import pytz
 from dateutil import parser
 from dateutil.parser import ParserError
 from django.contrib.postgres.aggregates import StringAgg
-from django.contrib.postgres.fields import JSONField
 from django.core.exceptions import ValidationError
-from django.core.files.storage import Storage, default_storage
 from django.db import models
 from django.db.models import (
     CharField,
@@ -34,16 +31,17 @@ from loguru import logger
 from pytz import timezone
 from rest_framework import serializers
 
-from baserow_dynamic_table.core.constants import UPSERT_OPTION_DICT_KEY
 from baserow_dynamic_table.core.db import (
     CombinedForeignKeyAndManyToManyMultipleFieldPrefetch,
     collate_expression,
 )
 from baserow_dynamic_table.core.fields import SyncedDateTimeField
+from baserow_dynamic_table.core.utils import list_to_comma_separated_string
 from baserow_dynamic_table.fields.field_cache import FieldCache
-from baserow_dynamic_table.models import Table
+from baserow_dynamic_table.table.models import Table
 from baserow_dynamic_table.types import SerializedRowHistoryFieldMetadata
 from baserow_dynamic_table.validators import UnicodeRegexValidator
+from .constants import UPSERT_OPTION_DICT_KEY
 from .deferred_field_fk_updater import DeferredFieldFkUpdater
 from .dependencies.handler import FieldDependants, FieldDependencyHandler
 from .dependencies.models import FieldDependency
@@ -56,18 +54,15 @@ from .exceptions import (
     LinkRowTableNotProvided,
     SelfReferencingLinkRowCannotHaveRelatedField,
 )
-from .expressions import extract_jsonb_array_values_to_single_string
 from .field_filters import (
     AnnotatedQ,
     contains_filter,
     contains_word_filter,
-    filename_contains_filter,
 )
 from .field_sortings import OptionallyAnnotatedOrderBy
 from .fields import (
-
     MultipleSelectManyToManyField,
-    SingleSelectForeignKey,
+    SingleSelectForeignKey, BaserowLastModifiedField,
 )
 from .handler import FieldHandler
 from .models import (
@@ -77,7 +72,6 @@ from .models import (
     DateField,
     EmailField,
     Field,
-    FileField,
     LastModifiedField,
     LinkRowField,
     LongTextField,
@@ -96,7 +90,6 @@ from .registries import (
     StartingRowType,
     field_type_registry,
 )
-from ..core.utils import list_to_comma_separated_string
 
 if TYPE_CHECKING:
     from baserow_dynamic_table.fields.dependencies.update_collector import (
@@ -1054,6 +1047,14 @@ class CreatedOnLastModifiedBaseFieldType(ReadOnlyFieldType, DateFieldType):
         return False
 
 
+class LastModifiedFieldType(CreatedOnLastModifiedBaseFieldType):
+    type = "last_modified"
+    model_class = LastModifiedField
+    source_field_name = "updated_on"
+    model_field_class = BaserowLastModifiedField
+    model_field_kwargs = {"sync_with": "updated_on"}
+
+
 class CreatedOnFieldType(CreatedOnLastModifiedBaseFieldType):
     type = "created_on"
     model_class = CreatedOnField
@@ -1478,19 +1479,19 @@ class LinkRowFieldType(FieldType):
         # Store the current table's model into the manytomany_models object so that the
         # related ManyToMany field can use that one. Otherwise we end up in a recursive
         # loop.
-        model.baserow_m2m_models[instance.table_id] = model
+        model.baserow_dynamic_table_m2m_models[instance.table_id] = model
 
-        # Check if the related table model is already in the model.baserow_m2m_model.
+        # Check if the related table model is already in the model.baserow_dynamic_table_m2m_model.
         if instance.is_self_referencing:
             related_model = model
         else:
-            related_model = model.baserow_m2m_models.get(instance.link_row_table_id)
+            related_model = model.baserow_dynamic_table_m2m_models.get(instance.link_row_table_id)
             # If we do not have a related table model already we can generate a new one.
             if related_model is None:
                 related_model = instance.link_row_table.get_model(
-                    manytomany_models=model.baserow_m2m_models
+                    manytomany_models=model.baserow_dynamic_table_m2m_models
                 )
-                model.baserow_m2m_models[instance.link_row_table_id] = related_model
+                model.baserow_dynamic_table_m2m_models[instance.link_row_table_id] = related_model
 
         instance._related_model = related_model
         related_name = f"reversed_field_{instance.id}"
@@ -1564,12 +1565,6 @@ class LinkRowFieldType(FieldType):
 
         if isinstance(link_row_table_id, int):
             table = TableHandler().get_table(link_row_table_id)
-            CoreHandler().check_permissions(
-                user,
-                CreateFieldOperationType.type,
-                workspace=table.database.workspace,
-                context=table,
-            )
             values["link_row_table"] = table
 
         return values
@@ -1714,22 +1709,6 @@ class LinkRowFieldType(FieldType):
         to_link_row_table_has_related_field = (
                 to_instance and to_field_kwargs["has_related_field"]
         )
-
-        if to_instance:
-            CoreHandler().check_permissions(
-                user,
-                CreateFieldOperationType.type,
-                to_field.table.database.workspace,
-                context=to_field.link_row_table,
-            )
-
-        if from_instance:
-            CoreHandler().check_permissions(
-                user,
-                DeleteRelatedLinkRowFieldOperationType.type,
-                from_field.table.database.workspace,
-                context=from_field.link_row_table,
-            )
 
         if (
                 from_link_row_table_has_related_field
@@ -1880,7 +1859,7 @@ class LinkRowFieldType(FieldType):
             self,
             table: "Table",
             serialized_values: Dict[str, Any],
-            # import_export_config: ImportExportConfig,
+            import_export_config,
             id_mapping: Dict[str, Any],
             deferred_fk_update_collector: DeferredFieldFkUpdater,
     ) -> Optional[Field]:
@@ -2118,302 +2097,6 @@ class EmailFieldType(CollationSortMixin, CharFieldMatchingRegexFieldType):
         return collate_expression(Value(value))
 
 
-class FileFieldType(FieldType):
-    type = "file"
-    model_class = FileField
-    can_be_in_form_view = True
-    can_get_unique_values = False
-
-    def get_search_expression(self, field: FileField, queryset: QuerySet) -> Expression:
-        """
-        Prepares a `FileField`.
-        """
-
-        return extract_jsonb_array_values_to_single_string(
-            field,
-            queryset,
-            path_to_value_in_jsonb_list=[
-                Value("visible_name", output_field=models.TextField())
-            ],
-        )
-
-    def _extract_file_names(self, value):
-        # Validates the provided object and extract the names from it. We need the name
-        # to validate if the file actually exists and to get the 'real' properties
-        # from it.
-        provided_files = []
-        for o in value:
-            provided_files.append(o)
-        return provided_files
-
-    def prepare_value_for_db(self, instance, value):
-        if value is None:
-            return []
-
-        if not isinstance(value, list):
-            raise ValidationError(
-                "The provided value must be a list.", code="not_a_list"
-            )
-
-        if len(value) == 0:
-            return []
-
-        provided_files = self._extract_file_names(value)
-
-        # Create a list of the serialized UserFiles in the originally provided order
-        # because that is also the order we need to store the serialized versions in.
-        user_files = []
-        queryset = UserFile.objects.all().name(*[f["name"] for f in provided_files])
-        for file in provided_files:
-            try:
-                user_file = next(
-                    user_file
-                    for user_file in queryset
-                    if user_file.name == file["name"]
-                )
-                serialized = user_file.serialize()
-                serialized["visible_name"] = (
-                        file.get("visible_name") or user_file.original_name
-                )
-            except StopIteration:
-                raise UserFileDoesNotExist(file["name"])
-
-            user_files.append(serialized)
-
-        return user_files
-
-    def prepare_value_for_db_in_bulk(
-            self, instance, values_by_row, continue_on_error=False
-    ):
-        provided_names_by_row = {}
-        name_map = defaultdict(list)
-
-        # Create {name -> row_indexes} map
-        for row_index, value in values_by_row.items():
-            provided_names_by_row[row_index] = self._extract_file_names(value)
-            names = [pn["name"] for pn in provided_names_by_row[row_index]]
-            for name in names:
-                name_map[name].append(row_index)
-
-        if not name_map:
-            return values_by_row
-
-        unique_names = set(name_map.keys())
-
-        # Query the database for existing files
-        files = UserFile.objects.all().name(*unique_names)
-        if len(files) != len(unique_names):
-            invalid_names = sorted(
-                list(unique_names - set((file.name) for file in files))
-            )
-            if continue_on_error:
-                for invalid_name in invalid_names:
-                    for row_index in name_map[invalid_name]:
-                        values_by_row[row_index] = UserFileDoesNotExist(invalid_name)
-            else:
-                raise UserFileDoesNotExist(invalid_names)
-
-        # Replacing file names by the actual file field dict
-        user_files_by_name = {file.name: file for file in files}
-        for row_index, value in values_by_row.items():
-            # Ignore already raised exceptions
-            if isinstance(value, Exception):
-                continue
-            serialized_files = []
-            for file_names in provided_names_by_row[row_index]:
-                user_file = user_files_by_name[file_names.get("name")]
-                serialized = user_file.serialize()
-                serialized["visible_name"] = (
-                        file_names.get("visible_name") or user_file.original_name
-                )
-                serialized_files.append(serialized)
-            values_by_row[row_index] = serialized_files
-
-        return values_by_row
-
-    def get_serializer_field(self, instance, **kwargs):
-        required = kwargs.get("required", False)
-        return serializers.ListSerializer(
-            **{
-                "child": FileFieldRequestSerializer(),
-                "required": required,
-                "allow_null": not required,
-                **kwargs,
-            }
-        )
-
-    def get_response_serializer_field(self, instance, **kwargs):
-        return FileFieldResponseSerializer(
-            **{"many": True, "required": False, **kwargs}
-        )
-
-    def get_export_value(self, value, field_object, rich_value=False):
-        files = []
-        for file in value:
-            if "name" in file:
-                path = UserFileHandler().user_file_path(file["name"])
-                url = default_storage.url(path)
-            else:
-                url = None
-
-            files.append(
-                {
-                    "visible_name": file["visible_name"],
-                    "name": file["name"],
-                    "url": url,
-                }
-            )
-
-        if rich_value:
-            return [{"visible_name": f["visible_name"], "url": f["url"]} for f in files]
-        else:
-            return list_to_comma_separated_string(
-                [f'{file["visible_name"]} ({file["url"]})' for file in files]
-            )
-
-    def get_human_readable_value(self, value, field_object):
-        file_names = []
-        for file in value:
-            file_names.append(
-                file["visible_name"],
-            )
-
-        return ", ".join(file_names)
-
-    def get_serializer_help_text(self, instance):
-        return (
-            "This field accepts an `array` containing objects with the name of "
-            "the file. The response contains an `array` of more detailed objects "
-            "related to the files."
-        )
-
-    def get_model_field(self, instance, **kwargs):
-        return JSONField(default=list, **kwargs)
-
-    def random_value(self, instance, fake, cache):
-        """
-        Selects between 0 and 3 random user files and returns those serialized in a
-        list.
-        """
-
-        count_name = f"field_{instance.id}_count"
-        queryset_name = f"field_{instance.id}_queryset"
-
-        if count_name not in cache:
-            cache[count_name] = UserFile.objects.all().count()
-
-        values = []
-        count = cache[count_name]
-
-        if count == 0:
-            return values
-
-        def get_random_objects_iterator(limit=10000):
-            user_ids = WorkspaceUser.objects.filter(
-                workspace=instance.table.database.workspace_id
-            ).values_list("user_id", flat=True)
-            qs = UserFile.objects.filter(uploaded_by_id__in=user_ids).order_by("?")
-            if count > limit:
-                return qs.iterator(chunk_size=limit)
-            else:
-                return cycle(qs.all())
-
-        if queryset_name not in cache:
-            cache[queryset_name] = get_random_objects_iterator()
-
-        qs = cache[queryset_name]
-
-        values = []
-        for _ in range(randrange(0, min(3, count))):  # nosec
-            try:
-                instance = next(qs)
-                serialized = instance.serialize()
-                serialized["visible_name"] = instance.original_name
-                values.append(serialized)
-            except StopIteration:
-                cache[queryset_name] = get_random_objects_iterator()
-
-        return values
-
-    def contains_query(self, *args):
-        return filename_contains_filter(*args)
-
-    def get_export_serialized_value(
-            self,
-            row: "GeneratedTableModel",
-            field_name: str,
-            cache: Dict[str, Any],
-            files_zip: Optional[ZipFile] = None,
-            storage: Optional[Storage] = None,
-    ) -> List[Dict[str, Any]]:
-        file_names = []
-        user_file_handler = UserFileHandler()
-
-        for file in self.get_internal_value_from_db(row, field_name):
-            # Check if the user file object is already in the cache and if not,
-            # it must be fetched and added to to it.
-            cache_entry = f"user_file_{file['name']}"
-            if cache_entry not in cache:
-                try:
-                    user_file = UserFile.objects.all().name(file["name"]).get()
-                except UserFile.DoesNotExist:
-                    continue
-
-                if files_zip is not None and file["name"] not in files_zip.namelist():
-                    # Load the user file from the content and write it to the zip file
-                    # because it might not exist in the environment that it is going
-                    # to be imported in.
-                    file_path = user_file_handler.user_file_path(user_file.name)
-                    with storage.open(file_path, mode="rb") as storage_file:
-                        files_zip.writestr(file["name"], storage_file.read())
-
-                cache[cache_entry] = user_file
-
-            file_names.append(
-                DatabaseExportSerializedStructure.file_field_value(
-                    name=file["name"],
-                    visible_name=file["visible_name"],
-                    original_name=cache[cache_entry].original_name,
-                )
-            )
-        return file_names
-
-    def set_import_serialized_value(
-            self,
-            row: "GeneratedTableModel",
-            field_name: str,
-            value: Dict[str, Any],
-            id_mapping: Dict[str, Any],
-            cache: Dict[str, Any],
-            files_zip: Optional[ZipFile],
-            storage: Optional[Storage],
-    ) -> None:
-        user_file_handler = UserFileHandler()
-        files = []
-
-        for file in value:
-            # files_zip could be None when files are in the same storage of the export
-            # so no need to export/reimport files already present in the storage.
-            if files_zip is None:
-                user_file = user_file_handler.get_user_file_by_name(file["name"])
-            else:
-                with files_zip.open(file["name"]) as stream:
-                    # Try to upload the user file with the original name to make sure
-                    # that if the was already uploaded, it will not be uploaded again.
-                    user_file = user_file_handler.upload_user_file(
-                        None, file["original_name"], stream, storage=storage
-                    )
-
-            value = user_file.serialize()
-            value["visible_name"] = file["visible_name"]
-            files.append(value)
-
-        setattr(row, field_name, files)
-
-    def are_row_values_equal(self, value1: any, value2: any) -> bool:
-        return {v["name"] for v in value1} == {v["name"] for v in value2}
-
-
 class SelectOptionBaseFieldType(FieldType):
     can_have_select_options = True
     allowed_fields = ["select_options"]
@@ -2488,28 +2171,6 @@ class SelectOptionBaseFieldType(FieldType):
 class SingleSelectFieldType(SelectOptionBaseFieldType):
     type = "single_select"
     model_class = SingleSelectField
-
-    def get_serializer_field(self, instance, **kwargs):
-        required = kwargs.get("required", False)
-        field_serializer = IntegerOrStringField(
-            **{
-                "required": required,
-                "allow_null": not required,
-                **kwargs,
-            },
-        )
-        return field_serializer
-
-    def get_response_serializer_field(self, instance, **kwargs):
-        required = kwargs.get("required", False)
-        return SelectOptionSerializer(
-            **{
-                "required": required,
-                "allow_null": not required,
-                "many": False,
-                **kwargs,
-            }
-        )
 
     def enhance_queryset(self, queryset, field, name):
         # It's important that this individual enhance_queryset method exists, even
@@ -2811,19 +2472,6 @@ class MultipleSelectFieldType(SelectOptionBaseFieldType):
     is_many_to_many_field = True
     _can_group_by = True
 
-    def get_serializer_field(self, instance, **kwargs):
-        required = kwargs.pop("required", False)
-        field_serializer = IntegerOrStringField(
-            **{
-                "required": required,
-                "allow_null": not required,
-                **kwargs,
-            },
-        )
-        return serializers.ListSerializer(
-            child=field_serializer, required=required, **kwargs
-        )
-
     def get_value_for_filter(self, row: "GeneratedTableModel", field) -> str:
         related_objects = getattr(row, field.db_column)
         values = [related_object.value for related_object in related_objects.all()]
@@ -2835,17 +2483,6 @@ class MultipleSelectFieldType(SelectOptionBaseFieldType):
     ) -> List[int]:
         related_objects = getattr(row, field_name)
         return [related_object.id for related_object in related_objects.all()]
-
-    def get_response_serializer_field(self, instance, **kwargs):
-        required = kwargs.get("required", False)
-        return SelectOptionSerializer(
-            **{
-                "required": required,
-                "allow_null": not required,
-                "many": True,
-                **kwargs,
-            }
-        )
 
     def enhance_queryset(self, queryset, field, name):
         # It's important that this individual enhance_queryset method exists, even

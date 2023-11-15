@@ -1,6 +1,5 @@
-from django.core.management import BaseCommand
-
 from baserow_dynamic_table.table.handler import TableHandler
+from django.core.management import BaseCommand
 
 
 class Command(BaseCommand):

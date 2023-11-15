@@ -1,7 +1,6 @@
 import typing
 from functools import lru_cache
 from typing import (
-    Any,
     Dict,
     Generic,
     List,
@@ -16,9 +15,11 @@ from typing import (
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 from rest_framework import serializers
-from rest_framework.serializers import Serializer
 
-from baserow_dynamic_table.fields.exceptions import InstanceTypeDoesNotExist, InstanceTypeAlreadyRegistered
+from baserow_dynamic_table.fields.exceptions import (
+    InstanceTypeDoesNotExist,
+    InstanceTypeAlreadyRegistered,
+)
 
 if typing.TYPE_CHECKING:
     from django.contrib.contenttypes.models import ContentType
@@ -131,7 +132,6 @@ class CustomFieldsInstanceMixin:
                 "extend the ModelInstanceMixin?"
             )
 
- 
 
 T = TypeVar("T")
 

@@ -3,20 +3,18 @@ import itertools
 import sys
 from datetime import timedelta
 
-from django.core.management.base import BaseCommand
-from django.db import transaction
-from django.utils import timezone
-
-from faker import Faker
-from tqdm import tqdm
-
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.action.signals import ActionCommandType
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.models import WorkspaceUser
 from baserow_dynamic_table.rows.actions import UpdateRowsActionType
 from baserow_dynamic_table.rows.handler import RowHandler
 from baserow_dynamic_table.rows.history import RowHistoryHandler
 from baserow_dynamic_table.rows.models import RowHistory
 from baserow_dynamic_table.table.models import Table
-from baserow.core.action.signals import ActionCommandType
-from baserow.core.models import WorkspaceUser
+from django.core.management.base import BaseCommand
+from django.db import transaction
+from django.utils import timezone
+from faker import Faker
+from tqdm import tqdm
 
 # for cache
 rows_values = None
@@ -100,8 +98,8 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             with tqdm(
-                total=limit,
-                desc=f"Adding {limit} entries to row history for row {row_id}",
+                    total=limit,
+                    desc=f"Adding {limit} entries to row history for row {row_id}",
             ) as progress:
                 for _ in range(limit):
                     record_row_history(

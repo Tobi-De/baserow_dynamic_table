@@ -1,13 +1,16 @@
-from typing import Optional
-
 from django.db import models
-from django.db.models import Field, Value
 from django.db.models.expressions import RawSQL
 from django.db.models.fields.related_descriptors import (
     ForwardManyToOneDescriptor,
     ManyToManyDescriptor,
 )
 from django.utils.functional import cached_property
+
+from baserow_dynamic_table.core.fields import SyncedDateTimeField
+
+
+class BaserowLastModifiedField(SyncedDateTimeField):
+    requires_refresh_after_update = True
 
 
 class SingleSelectForwardManyToOneDescriptor(ForwardManyToOneDescriptor):
@@ -148,129 +151,6 @@ class MultipleSelectManyToManyField(models.ManyToManyField):
                     additional_filters=self.reversed_additional_filters,
                 ),
             )
-
-
-class BaserowExpression:
-    pass
-
-
-class BaserowExpressionField(models.Field):
-    """
-    A Custom Django field which is always set to the value of the provided Baserow
-    Expression.
-    """
-
-    # Ensure when a model using one of these fields is created that the values of any
-    # generated columns are returned using a INSERT ... RETURNING pk, gen_col_1, etc
-    # as there is no default and no way of knowing what the expression evaluates to
-    db_returning = True
-    requires_refresh_after_update = True
-
-    def __init__(
-            self,
-            expression: Optional[BaserowExpression],
-            expression_field: Field,
-            requires_refresh_after_insert: bool,
-            *args,
-            **kwargs,
-    ):
-        """
-        :param expression: The Baserow expression used to calculate this fields value.
-        :param expression_field: An instance of a Django field that should be used to
-            store the result of the expression in the database.
-        """
-
-        self.expression = expression
-        self.expression_field = expression_field
-        self.requires_refresh_after_insert = requires_refresh_after_insert
-
-        # Add all the various lookups for the underlying Django field so specific
-        # filters work on a field of this type. E.g. if expression_field is a DateField
-        # then by doing this a model containing this field can then be used like so:
-        # Model.objects.filter(expr_field__year='2020')
-        for name, lookup in self.expression_field.get_lookups().items():
-            self.register_lookup(lookup, lookup_name=name)
-        super().__init__(*args, **kwargs)
-
-    def __copy__(self):
-        obj = super().__copy__()
-        # Un-override the __class__ property below so we dont un-serialize literally as
-        # self.expression_field.__class__
-        obj.__class__ = BaserowExpressionField
-        return obj
-
-    def __reduce__(self):
-        reduced_tuple = super().__reduce__()
-        if len(reduced_tuple) == 3:
-            # Un-override the __class__ property below so we dont un-serialize
-            # literally as self.expression_field.__class__
-            return reduced_tuple[0], (BaserowExpressionField,), reduced_tuple[2]
-        else:
-            return reduced_tuple
-
-    @property
-    def __class__(self):
-        # Pretend to be the expression_field Django model field so Django will let
-        # us do filters on a field of this type which are valid for the underlying
-        # expression field.
-        return self.expression_field.__class__
-
-    def get_transform(self, name):
-        # When a model field of this type is pickled and stored in the Baserow model
-        # cache, the lookups on the class setup in the __init__ are not persisted.
-        # So to ensure when they are accessed on a unserialized version of this model
-        # we override this method to delegate to the underlying field type. This means
-        # that django lookups and transforms like model.objects.filter(
-        # formula_field_1__year=Value(2023)) work out of the box and so view filters
-        # work on formula fields.
-        return self.expression_field.get_transform(name)
-
-    def get_lookup(self, name):
-        # See comment in get_transform as to why we delegate here.
-        return self.expression_field.get_lookup(name)
-
-    def deconstruct(self):
-        name, path, args, kwargs = super().deconstruct()
-        kwargs["expression"] = self.expression
-        kwargs["expression_field"] = self.expression_field
-        kwargs["requires_refresh_after_insert"] = self.requires_refresh_after_insert
-        return name, path, args, kwargs
-
-    def db_type(self, connection):
-        return self.expression_field.db_type(connection)
-
-    def get_prep_value(self, value):
-        return self.expression_field.get_prep_value(value)
-
-    def from_db_value(self, value, expression, connection):
-        if hasattr(self.expression_field, "from_db_value"):
-            return self.expression_field.from_db_value(value, expression, connection)
-        else:
-            return value
-
-    def select_format(self, compiler, sql, params):
-        return self.expression_field.select_format(compiler, sql, params)
-
-    def pre_save(self, model_instance, add):
-        if self.expression is None:
-            return Value(None)
-        else:
-            if add:
-                return FormulaHandler.baserow_expression_to_insert_django_expression(
-                    self.expression, model_instance
-                )
-            else:
-                return (
-                    FormulaHandler.baserow_expression_to_row_update_django_expression(
-                        self.expression, model_instance
-                    )
-                )
-
-    @property
-    def valid_for_bulk_update(self):
-        # When the expression is None we are in the error state and so shouldn't be
-        # included in any BULK UPDATE statement.
-        return self.expression is not None
 
 
 class SerialField(models.Field):

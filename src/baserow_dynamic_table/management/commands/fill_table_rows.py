@@ -7,18 +7,16 @@ from decimal import Decimal
 from math import ceil
 from typing import List, Tuple
 
-from django.core.management.base import BaseCommand
-from django.db.models import Max
-from django.db.models.fields.related import ForeignKey
-
-from faker import Faker
-from tqdm import tqdm
-
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.management.utils import run_command_concurrently
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.utils import grouper
 from baserow_dynamic_table.rows.handler import RowHandler
 from baserow_dynamic_table.search.handler import SearchHandler
 from baserow_dynamic_table.table.models import Table
-from baserow.core.management.utils import run_command_concurrently
-from baserow.core.utils import grouper
+from django.core.management.base import BaseCommand
+from django.db.models import Max
+from django.db.models.fields.related import ForeignKey
+from faker import Faker
+from tqdm import tqdm
 
 
 def underscore(word: str) -> str:
@@ -44,9 +42,9 @@ class Command(BaseCommand):
             type=str,
             nargs="*",
             help="Optional, replicate the rows into other table IDs at the same time. "
-            "Useful if you're trying to benchmark exact tables against one "
-            "another. The tables in `replicate_to_table_ids` *must* have the "
-            "exact field names and types as in `table_id`.",
+                 "Useful if you're trying to benchmark exact tables against one "
+                 "another. The tables in `replicate_to_table_ids` *must* have the "
+                 "exact field names and types as in `table_id`.",
         )
         parser.add_argument(
             "--concurrency",
@@ -150,7 +148,7 @@ class Command(BaseCommand):
         else:
             run_command_concurrently(
                 [
-                    "./baserow",
+                    "./baserow_dynamic_table_dynamic_table_dynamic_table",
                     "fill_table_rows",
                     str(table_id),
                     str(int(limit / concurrency)),
@@ -208,17 +206,17 @@ def validate_replicated_tables(source_table_model, replicated_table_models):
         model_field_map = extract_table_fields(model)
         if model_field_map != source_field_map:
             exc_msg = (
-                f"The fields in table {model.baserow_table_id} do not match "
-                f"those in source table {source_table_model.baserow_table_id}."
+                f"The fields in table {model.baserow_dynamic_table_dynamic_table_dynamic_table_table_id} do not match "
+                f"those in source table {source_table_model.baserow_dynamic_table_dynamic_table_dynamic_table_table_id}."
             )
             subtractive_changes = dict(set(source_field_map) - set(model_field_map))
             if subtractive_changes:
-                exc_msg += f"\n\nFields missing from table {model.baserow_table_id}:\n"
+                exc_msg += f"\n\nFields missing from table {model.baserow_dynamic_table_dynamic_table_dynamic_table_table_id}:\n"
                 for field_name, field_type in subtractive_changes.items():
                     exc_msg += f"- {field_name} (type: {field_type})"
             additive_changes = dict(set(model_field_map) - set(source_field_map))
             if additive_changes:
-                exc_msg += f"\n\nFields added in table {model.baserow_table_id}:\n"
+                exc_msg += f"\n\nFields added in table {model.baserow_dynamic_table_dynamic_table_dynamic_table_table_id}:\n"
                 for field_name, field_type in additive_changes.items():
                     exc_msg += f"- {field_name} (type: {field_type})"
             raise ValueError(exc_msg)
@@ -238,7 +236,9 @@ def generate_values_for_one_or_more_tables(models, fake, cache):
             field_type = field_object["type"].type
             field_name = underscore(field_object["field"].name.lower())
             key = f"{field_type}_{field_name}"
-            field_object["baserow_table_id"] = model.baserow_table_id
+            field_object[
+                "baserow_dynamic_table_dynamic_table_dynamic_table_table_id"
+            ] = model.baserow_dynamic_table_dynamic_table_dynamic_table_table_id
             grouped_fields_by_name_and_type[key]["field_objects"].append(field_object)
 
     fields_grouped_by_table = defaultdict(dict)
@@ -250,7 +250,7 @@ def generate_values_for_one_or_more_tables(models, fake, cache):
                     field_object["field"], fake, cache
                 )
             field_id = field_object["field"].id
-            table_id = field_object["baserow_table_id"]
+            table_id = field_object["baserow_dynamic_table_dynamic_table_dynamic_table_table_id"]
             fields_grouped_by_table[table_id][f"field_{field_id}"] = random_value
 
     return fields_grouped_by_table
@@ -317,7 +317,7 @@ def bulk_create_rows(model, rows):
 
 
 def fill_table_rows(
-    limit, table, batch_size=-1, source_table_model=None, replicated_table_models=None
+        limit, table, batch_size=-1, source_table_model=None, replicated_table_models=None
 ):
     fake = Faker()
     cache = {}
@@ -335,8 +335,8 @@ def fill_table_rows(
         batch_size = limit
 
     with tqdm(
-        total=limit,
-        desc=f"Adding {limit} rows to table {table.pk} in worker {os.getpid()}",
+            total=limit,
+            desc=f"Adding {limit} rows to table {table.pk} in worker {os.getpid()}",
     ) as pbar:
         for group in grouper(batch_size, range(limit)):
             rows = defaultdict(list)
@@ -348,15 +348,17 @@ def fill_table_rows(
 
                 for model in models:
                     instance, relations = create_row_instance_and_relations(
-                        fields_grouped_by_table[model.baserow_table_id],
+                        fields_grouped_by_table[model.baserow_dynamic_table_dynamic_table_dynamic_table_table_id],
                         model,
                         fake,
                         cache,
                         order,
                     )
-                    rows[model.baserow_table_id].append((instance, relations))
+                    rows[model.baserow_dynamic_table_dynamic_table_dynamic_table_table_id].append(
+                        (instance, relations)
+                    )
                     pbar.update(1)
 
             for model in models:
                 pbar.refresh()
-                bulk_create_rows(model, rows[model.baserow_table_id])
+                bulk_create_rows(model, rows[model.baserow_dynamic_table_dynamic_table_dynamic_table_table_id])

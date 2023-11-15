@@ -1,5 +1,6 @@
 from typing import Callable, List, Optional
 
+import typing_extensions
 from django.db.models import (
     CharField,
     Expression,
@@ -13,18 +14,16 @@ from django.db.models import (
 )
 from django.db.models.functions import Cast
 
-import typing_extensions
-
 if typing_extensions.TYPE_CHECKING:
     from baserow_dynamic_table.fields.models import Field
 
 
 def extract_jsonb_list_values_to_array(
-    field: "Field",
-    queryset: QuerySet,
-    path_to_value_in_jsonb_list: Optional[List[Expression]] = None,
-    transform_value_to_text_func: Optional[Callable[[Expression], Expression]] = None,
-    extract_as_text: bool = True,
+        field: "Field",
+        queryset: QuerySet,
+        path_to_value_in_jsonb_list: Optional[List[Expression]] = None,
+        transform_value_to_text_func: Optional[Callable[[Expression], Expression]] = None,
+        extract_as_text: bool = True,
 ) -> Expression:
     """
     For a field whose cells contain a JSONB list of objects (File and Lookup fields)
@@ -70,7 +69,6 @@ def extract_jsonb_list_values_to_array(
     if not path_to_value_in_jsonb_list:
         path_to_value_in_jsonb_list = [Value("value", output_field=CharField())]
     if not transform_value_to_text_func:
-
         def transform_value_to_text_func(x):
             return Cast(x, output_field=CharField())
 
@@ -104,12 +102,12 @@ def json_extract_path(expr, path_to_value_in_jsonb_list, extract_as_text=True):
 
 
 def extract_jsonb_array_values_to_single_string(
-    field: "Field",
-    queryset: QuerySet,
-    path_to_value_in_jsonb_list: Optional[List[Expression]] = None,
-    transform_value_to_text_func: Optional[Callable[[Expression], Expression]] = None,
-    extract_as_text: bool = True,
-    delimiter: str = " ",
+        field: "Field",
+        queryset: QuerySet,
+        path_to_value_in_jsonb_list: Optional[List[Expression]] = None,
+        transform_value_to_text_func: Optional[Callable[[Expression], Expression]] = None,
+        extract_as_text: bool = True,
+        delimiter: str = " ",
 ):
     """
     For a field whose cells contain a JSONB list of objects (File and Lookup fields)

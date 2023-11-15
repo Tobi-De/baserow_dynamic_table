@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Type
 
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
-from django.db.models import Case, QuerySet, Value, When
+from django.db.models import Case, QuerySet, Value, When, Manager
 from django.db.models.fields import NOT_PROVIDED
 from django.db.models.fields.mixins import FieldCacheMixin
 from django.utils.functional import cached_property
@@ -16,7 +16,15 @@ from baserow_dynamic_table.core.db import (
     recalculate_full_orders,
 )
 from baserow_dynamic_table.core.fields import SyncedDateTimeField
-from baserow_dynamic_table.core.registry import ModelRegistryMixin, Instance
+from baserow_dynamic_table.core.managers import (
+    NoTrashManager,
+    TrashOnlyManager,
+    make_trash_manager,
+)
+from baserow_dynamic_table.core.registry import (
+    ModelRegistryMixin,
+    Instance,
+)
 
 
 class IdDoesNotExist(Exception):
@@ -30,7 +38,7 @@ class OrderableMixin:
 
     @classmethod
     def get_highest_order_of_queryset(
-            cls, queryset: QuerySet, field: str = "order"
+        cls, queryset: QuerySet, field: str = "order"
     ) -> int:
         """
         Returns the highest existing value of the provided field.
@@ -44,7 +52,7 @@ class OrderableMixin:
 
     @classmethod
     def order_objects(
-            cls, queryset: QuerySet, new_order: List[int], field: str = "order"
+        cls, queryset: QuerySet, new_order: List[int], field: str = "order"
     ) -> List[int]:
         """
         Changes the order of the objects in the given queryset to the desired order
@@ -116,7 +124,7 @@ class FractionOrderableMixin(OrderableMixin):
 
     @classmethod
     def get_highest_order_of_queryset(
-            cls, queryset: QuerySet, amount: int = 1, field: str = "order"
+        cls, queryset: QuerySet, amount: int = 1, field: str = "order"
     ) -> List[Decimal]:
         """
         Returns the highest existing values of the provided order field.
@@ -131,11 +139,11 @@ class FractionOrderableMixin(OrderableMixin):
 
     @classmethod
     def get_unique_orders_before_item(
-            cls,
-            before: Optional[models.Model],
-            queryset: QuerySet,
-            amount: int = 1,
-            field: str = "order",
+        cls,
+        before: Optional[models.Model],
+        queryset: QuerySet,
+        amount: int = 1,
+        field: str = "order",
     ) -> List[Decimal]:
         """
         Calculates a list of unique decimal orders that can safely be used before the
@@ -157,9 +165,9 @@ class FractionOrderableMixin(OrderableMixin):
 
     @classmethod
     def recalculate_full_orders(
-            cls,
-            field="order",
-            queryset: Optional[QuerySet] = None,
+        cls,
+        field="order",
+        queryset: Optional[QuerySet] = None,
     ):
         """
         Recalculates the order to whole numbers of all instances based on the existing
@@ -412,32 +420,41 @@ def support_foreignkey_compat(compats: Dict[str, str]) -> Type[models.Model]:
     return mixin
 
 
-GroupToWorkspaceCompatModelMixin = support_foreignkey_compat({"group": "workspace"})
-
-
-class GroupToWorkspaceCompatModelSerializerMixin:
+def make_trashable_mixin(parent):
     """
-    A mixin that allows us to rename the `group` field to `workspace` when serializing.
+    Constructs a mixin class which overrides a models managers to ensure trashed entries
+    are not available via objects, but instead via the new trash manager.
+
+    :param parent: If specified will use the trashed column in a related model where
+        parent is the name of the FK to the related model.
+    :return: A mixin with overridden managers which correctly filter out trashed rows.
     """
 
-    def to_representation(self, instance):
-        """
-        Provide both the deprecated `group` field and the new `workspace` when
-        serializing.
-        """
+    no_trash_manager = make_trash_manager(trashed=False, parent=parent)
+    trash_only_manager = make_trash_manager(trashed=True, parent=parent)
 
-        ret = super().to_representation(instance)
-        if "workspace" in ret:
-            ret["group"] = ret["workspace"]
+    class TrashableMixin(models.Model):
+        objects = no_trash_manager()
+        trash = trash_only_manager()
+        objects_and_trash = Manager()
 
-        return ret
+        class Meta:
+            abstract = True
 
-    def to_internal_value(self, data):
-        """
-        Allow the deprecated `group` field to be used when deserializing.
-        """
+    return TrashableMixin
 
-        if "group" in data and "workspace" not in data:
-            data["workspace"] = data.pop("group")
 
-        return super().to_internal_value(data)
+class TrashableModelMixin(models.Model):
+    """
+    This mixin allows this model to be trashed and restored from the trash by adding
+    new columns recording it's trash status.
+    """
+
+    trashed = models.BooleanField(default=False, db_index=True)
+
+    objects = NoTrashManager()
+    trash = TrashOnlyManager()
+    objects_and_trash = Manager()
+
+    class Meta:
+        abstract = True

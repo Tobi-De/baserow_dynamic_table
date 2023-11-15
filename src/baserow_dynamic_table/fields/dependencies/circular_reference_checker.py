@@ -24,7 +24,9 @@
 
 from django.conf import settings
 
-from baserow_dynamic_table.fields.dependencies.models import FieldDependency
+from baserow_dynamic_table.fields.dependencies.models import (
+    FieldDependency,
+)
 
 
 def will_cause_circular_dep(from_field, to_field):

@@ -1,15 +1,13 @@
 from django.core.exceptions import ValidationError
 
-
-class InstanceTypeAlreadyRegistered(Exception):
-    pass
+from baserow_dynamic_table.core.exceptions import (
+    InstanceTypeAlreadyRegistered,
+    InstanceTypeDoesNotExist,
+    LockConflict,
+)
 
 
 class FieldTypeAlreadyRegistered(InstanceTypeAlreadyRegistered):
-    pass
-
-
-class InstanceTypeDoesNotExist(Exception):
     pass
 
 
@@ -237,10 +235,6 @@ class IncompatibleFieldTypeForUniqueValues(Exception):
     """Raised when the unique values of an incompatible field are requested."""
 
 
-class LockConflict(Exception):
-    pass
-
-
 class FailedToLockFieldDueToConflict(LockConflict):
     """
     Raised when a user tried to update a field which was locked by another
@@ -251,4 +245,12 @@ class FailedToLockFieldDueToConflict(LockConflict):
 class DateForceTimezoneOffsetValueError(ValueError):
     """
     Raised when the force_timezone_offset value offset cannot be set.
+    """
+
+
+class ReadOnlyFieldHasNoInternalDbValueError(Exception):
+    """
+    Raised when a read only field is trying to get its internal db value.
+    This is because there is no valid value that can be returned which can then pass
+    through "prepare_value_for_db" for a read_only field."
     """

@@ -2,18 +2,16 @@ import os
 import sys
 from random import choice, randint
 
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.handler import CoreHandler, WorkspaceDoesNotExist
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.management.utils import run_command_concurrently
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.models import Workspace
+from baserow_dynamic_table.table.handler import TableHandler
+from baserow_dynamic_table.tokens.handler import TokenHandler
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
-
 from faker import Faker
 from tqdm import tqdm
-
-from baserow_dynamic_table.table.handler import TableHandler
-from baserow_dynamic_table.tokens.handler import TokenHandler
-from baserow.core.handler import CoreHandler, WorkspaceDoesNotExist
-from baserow.core.management.utils import run_command_concurrently
-from baserow.core.models import Workspace
 
 from .fill_table_fields import fill_table_fields
 from .fill_table_rows import fill_table_rows
@@ -132,7 +130,7 @@ class Command(BaseCommand):
             concurrency = min(concurrency, database_count)
             run_command_concurrently(
                 [
-                    "./baserow",
+                    "./baserow_dynamic_table_dynamic_table_dynamic_table",
                     "fill_workspace",
                     str(user_id),
                     "--workspace_id",
@@ -161,14 +159,14 @@ class Command(BaseCommand):
 
 
 def fill_workspace_with_data(
-    user,
-    workspace: Workspace,
-    database_count: int,
-    table_count: int,
-    token_count: int,
-    avg_field_count: int,
-    avg_row_count: int,
-    percentage_variation: int = 0,
+        user,
+        workspace: Workspace,
+        database_count: int,
+        table_count: int,
+        token_count: int,
+        avg_field_count: int,
+        avg_row_count: int,
+        percentage_variation: int = 0,
 ):
     process_id = os.getpid()
     faker = Faker()
@@ -183,8 +181,8 @@ def fill_workspace_with_data(
     max_row_count = int(avg_row_count * (1 + percentage_variation / 100))
 
     with tqdm(
-        range(database_count * table_count + token_count),
-        desc=f"Worker" f" {process_id}",
+            range(database_count * table_count + token_count),
+            desc=f"Worker" f" {process_id}",
     ) as pbar:
         created_databases_and_tables = {}
         for _ in range(database_count):

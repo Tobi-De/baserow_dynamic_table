@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 
-from django.db import models, transaction
-from psycopg2 import sql
-
 from baserow_dynamic_table.db.schema import (
     lenient_schema_editor,
     safe_django_schema_editor,
 )
+from django.db import models, transaction
+from psycopg2 import sql
+
 from .models import (
     FileField,
     LinkRowField,

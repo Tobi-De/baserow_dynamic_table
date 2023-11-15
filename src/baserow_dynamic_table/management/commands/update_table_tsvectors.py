@@ -1,12 +1,11 @@
 import sys
 
-from django.core.management.base import BaseCommand
-
 from baserow_dynamic_table.search.exceptions import (
     PostgresFullTextSearchDisabledException,
 )
 from baserow_dynamic_table.search.handler import SearchHandler
 from baserow_dynamic_table.table.models import Table
+from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
@@ -41,8 +40,8 @@ class Command(BaseCommand):
         except PostgresFullTextSearchDisabledException:
             self.stdout.write(
                 self.style.ERROR(
-                    "Your Baserow installation has Postgres full-text"
+                    "Your baserow_dynamic_table_dynamic_table_dynamic_table installation has Postgres full-text"
                     "search disabled. To use full-text, ensure that"
-                    "BASEROW_USE_PG_FULLTEXT_SEARCH=true."
+                    "baserow_dynamic_table_dynamic_table_dynamic_table_USE_PG_FULLTEXT_SEARCH=true."
                 )
             )

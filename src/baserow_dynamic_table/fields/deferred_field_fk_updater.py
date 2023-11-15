@@ -26,7 +26,7 @@ class DeferredFieldFkUpdater:
         self.deferred_field_fk_updates_per_model_class = defaultdict(list)
 
     def add_deferred_fk_to_update(
-        self, field: "Field", field_fk_attr: str, original_field_fk_id: int
+            self, field: "Field", field_fk_attr: str, original_field_fk_id: int
     ):
         self.deferred_field_fk_updates_per_model_class[type(field)].append(
             (field, field_fk_attr, original_field_fk_id)
@@ -34,8 +34,8 @@ class DeferredFieldFkUpdater:
 
     def run_deferred_fk_updates(self, original_to_new_field_id_mapping: Dict[int, int]):
         for (
-            field_model_class,
-            deferred_field_fk_updates,
+                field_model_class,
+                deferred_field_fk_updates,
         ) in self.deferred_field_fk_updates_per_model_class.items():
             fields_to_bulk_update = {}
             attr_names = set()

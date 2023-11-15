@@ -1,7 +1,6 @@
+from baserow_dynamic_table.fields.tasks import run_periodic_fields_updates
 from django.core.management.base import BaseCommand
 from django.db import transaction
-
-from baserow_dynamic_table.fields.tasks import run_periodic_fields_updates
 
 
 class Command(BaseCommand):

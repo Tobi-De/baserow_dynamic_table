@@ -1,13 +1,16 @@
 import os
 import sys
 
+import Database
+import TableHandler
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.management.utils import (
+    run_command_concurrently,
+)
 from django.core.management.base import BaseCommand
-
 from tqdm import tqdm
 
-from baserow_dynamic_table.models import Database
-from baserow_dynamic_table.table.handler import TableHandler
-from baserow.core.management.utils import run_command_concurrently
+from baserow_dynamic_table.models
+from baserow_dynamic_table.table.handler
 
 
 class Command(BaseCommand):
@@ -53,7 +56,7 @@ class Command(BaseCommand):
         else:
             run_command_concurrently(
                 [
-                    "./baserow",
+                    "./baserow_dynamic_table_dynamic_table_dynamic_table",
                     "fill_tables",
                     str(database_id),
                     str(int(limit / concurrency)),

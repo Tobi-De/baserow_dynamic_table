@@ -1,13 +1,13 @@
-from django.core.management.base import BaseCommand
-
 import graphviz
-from tqdm import tqdm
-
-from baserow_dynamic_table.fields.dependencies.models import FieldDependency
+from baserow_dynamic_table.fields.dependencies.models import (
+    FieldDependency,
+)
 from baserow_dynamic_table.fields.models import Field, LinkRowField
 from baserow_dynamic_table.fields.registries import field_type_registry
 from baserow_dynamic_table.models import Database
 from baserow_dynamic_table.table.models import Table
+from django.core.management.base import BaseCommand
+from tqdm import tqdm
 
 
 class Command(BaseCommand):
@@ -21,7 +21,7 @@ class Command(BaseCommand):
             "database_id",
             type=str,
             help="The database to generate the field dependency graph for or all to "
-            "generate for all databases.",
+                 "generate for all databases.",
         )
         parser.add_argument(
             "--output-dir",
@@ -72,7 +72,7 @@ class Command(BaseCommand):
 
 
 def draw_field_graph(
-    database: Database, output_dir: str, gv_files_only: bool, draw_m2m_boxes: bool
+        database: Database, output_dir: str, gv_files_only: bool, draw_m2m_boxes: bool
 ):
     kwargs = {"format": "png"} if not gv_files_only else {"format": "gv"}
     dot = graphviz.Digraph(
@@ -100,16 +100,16 @@ def draw_field_graph(
 
     if draw_m2m_boxes:
         for relation_id in (
-            LinkRowField.objects.filter(table__database=database)
-            .values_list("link_row_relation_id", flat=True)
-            .distinct()
+                LinkRowField.objects.filter(table__database=database)
+                        .values_list("link_row_relation_id", flat=True)
+                        .distinct()
         ):
             with dot.subgraph(name=f"cluster_rel_{relation_id}") as c:
                 c.attr(label=f"link row (rel_{relation_id})")
                 c.attr(style="filled", color="lightgrey")
                 c.node_attr.update(shape="point", color="black")
                 for via_dep in FieldDependency.objects.filter(
-                    via__link_row_relation_id=relation_id
+                        via__link_row_relation_id=relation_id
                 ):
                     c.node(via_node_name_func(via_dep), f"")
 

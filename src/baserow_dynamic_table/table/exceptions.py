@@ -1,3 +1,6 @@
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.exceptions import LockConflict
+
+
 class TableDoesNotExist(Exception):
     """Raised when trying to get a table that doesn't exist."""
 
@@ -42,7 +45,7 @@ class InitialTableDataDuplicateName(Exception):
     """
 
 
-class FailedToLockTableDueToConflict(Exception):
+class FailedToLockTableDueToConflict(LockConflict):
     """
     Raised when the table is in use by some concurrent operation and the lock cannot
     be obtained immediately.

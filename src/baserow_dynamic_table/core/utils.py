@@ -15,12 +15,11 @@ from itertools import islice
 from numbers import Number
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 
+from baserow_dynamic_table.db.schema import optional_atomic
 from django.db import transaction
 from django.db.models import ForeignKey
 from django.db.models.fields import NOT_PROVIDED
 from django.db.transaction import get_connection
-
-from baserow_dynamic_table.db.schema import optional_atomic
 
 
 class CannotCalculateIntermediateOrder(Exception):

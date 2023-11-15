@@ -7,7 +7,7 @@ from django.db.models.expressions import OrderBy
 @dataclass
 class OptionallyAnnotatedOrderBy:
     """
-    Represents a sorting for a single Baserow field, needed by
+    Represents a sorting for a single baserow_dynamic_table_dynamic_table_dynamic_table field, needed by
     field types "get_order" methods.
 
     It holds the Django's OrderBy expression to be used in queryset.order() for

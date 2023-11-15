@@ -1,16 +1,23 @@
 import sys
 from tempfile import NamedTemporaryFile
 
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.models import Workspace
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.utils import Progress
+
+from baserow_dynamic_table.airtable.exceptions
+import
+
+(
+    AirtableBaseNotPublic,
+)
+from baserow_dynamic_table.airtable.handler
+import AirtableHandler
+
+from baserow_dynamic_table.airtable.utils
+import extract_share_id_from_url
 from django.core.management.base import BaseCommand
 from django.db import transaction
-
 from tqdm import tqdm
-
-from baserow_dynamic_table.airtable.exceptions import AirtableBaseNotPublic
-from baserow_dynamic_table.airtable.handler import AirtableHandler
-from baserow_dynamic_table.airtable.utils import extract_share_id_from_url
-from baserow.core.models import Workspace
-from baserow.core.utils import Progress
 
 
 class Command(BaseCommand):
@@ -27,13 +34,13 @@ class Command(BaseCommand):
             "workspace_id",
             type=int,
             help="The workspace ID where a copy of the imported Airtable base must be "
-            "added to.",
+                 "added to.",
         )
         parser.add_argument(
             "public_base_url",
             type=str,
             help="The URL of the publicly shared Airtable base "
-            "(e.g. https://airtable.com/shrxxxxxxxxxxxxxx).",
+                 "(e.g. https://airtable.com/shrxxxxxxxxxxxxxx).",
         )
 
     @transaction.atomic

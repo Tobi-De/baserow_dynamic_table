@@ -78,9 +78,7 @@ WSGI_APPLICATION = "demo.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases
 
-DATABASES = {
-    "default": env.db("DATABASE_URL")
-}
+DATABASES = {"default": env.db("DATABASE_URL")}
 DATABASES["default"]["ATOMIC_REQUESTS"] = True
 
 # Password validation
@@ -122,7 +120,7 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-BASEROW_DISABLE_MODEL_CACHE = True
+baserow_dynamic_table_dynamic_table_dynamic_table_DISABLE_MODEL_CACHE = True
 TESTS = True
 GENERATED_MODEL_CACHE_NAME = "generated-models"
 REDIS_URL = "redis://127.0.0.1:6379"
@@ -130,11 +128,11 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_URL,
-        "KEY_PREFIX": "baserow-default-cache",
+        "KEY_PREFIX": "baserow_dynamic_table_dynamic_table_dynamic_table-default-cache",
     },
     GENERATED_MODEL_CACHE_NAME: {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_URL,
-        "KEY_PREFIX": f"baserow-{GENERATED_MODEL_CACHE_NAME}-cache",
+        "KEY_PREFIX": f"baserow_dynamic_table_dynamic_table_dynamic_table-{GENERATED_MODEL_CACHE_NAME}-cache",
     },
 }

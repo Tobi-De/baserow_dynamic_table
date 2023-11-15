@@ -1,38 +1,43 @@
 from typing import Any, Dict, List, Optional
 
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.exceptions import TrashItemDoesNotExist
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.models import TrashEntry
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.trash.exceptions import RelatedTableTrashedException
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.trash.registries import TrashableItemType
+from baserow_dynamic_table.db.schema import safe_django_schema_editor
+from baserow_dynamic_table.fields.dependencies.update_collector import (
+    FieldUpdateCollector,
+)
+from baserow_dynamic_table.fields.field_cache import FieldCache
+from baserow_dynamic_table.fields.handler import FieldHandler
+from baserow_dynamic_table.fields.models import Field
+from baserow_dynamic_table.fields.registries import field_type_registry
+from baserow_dynamic_table.rows.signals import rows_created
+from baserow_dynamic_table.table.models import GeneratedTableModel, Table
+from baserow_dynamic_table.table.signals import (
+    table_created,
+    table_updated,
+)
+from baserow_dynamic_table.views.handler import (
+    ViewHandler,
+    ViewIndexingHandler,
+)
+from baserow_dynamic_table.views.models import View
+from baserow_dynamic_table.views.registries import (
+    view_ownership_type_registry,
+    view_type_registry,
+)
+from baserow_dynamic_table.views.signals import view_created
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser
 from django.db import connection
 
-from baserow.contrib.database.db.schema import safe_django_schema_editor
-from baserow.contrib.database.fields.dependencies.update_collector import (
-    FieldUpdateCollector,
-)
-from baserow.contrib.database.fields.field_cache import FieldCache
-from baserow.contrib.database.fields.handler import FieldHandler
-from baserow.contrib.database.fields.models import Field
-from baserow.contrib.database.fields.registries import field_type_registry
-from baserow.contrib.database.rows.signals import rows_created
-from baserow.contrib.database.table.models import GeneratedTableModel, Table
-from baserow.contrib.database.table.signals import table_created, table_updated
-from baserow.contrib.database.views.handler import ViewHandler, ViewIndexingHandler
-from baserow.contrib.database.views.models import View
-from baserow.contrib.database.views.registries import (
-    view_ownership_type_registry,
-    view_type_registry,
-)
-from baserow.contrib.database.views.signals import view_created
-from baserow.core.exceptions import TrashItemDoesNotExist
-from baserow.core.models import TrashEntry
-from baserow.core.trash.exceptions import RelatedTableTrashedException
-from baserow.core.trash.registries import TrashableItemType
-
+from .models import TrashedRows
 from ..fields.operations import RestoreFieldOperationType
-from ..rows.operations import RestoreDatabaseRowOperationType
+from ..rows.operations import RestoreDatabaserow_dynamic_table_dynamic_table_dynamic_tableOperationType
 from ..search.handler import SearchHandler
 from ..table.operations import RestoreDatabaseTableOperationType
 from ..views.operations import RestoreViewOperationType
-from .models import TrashedRows
 
 User = get_user_model()
 
@@ -58,10 +63,10 @@ class TableTrashableItemType(TrashableItemType):
                 )
             ]
             if TrashEntry.objects.filter(
-                trash_item_type="field",
-                trash_item_id__in=field_ids_to_check_for_individual_entries,
-                application=trashed_item.database,
-                workspace=trashed_item.database.workspace,
+                    trash_item_type="field",
+                    trash_item_id__in=field_ids_to_check_for_individual_entries,
+                    application=trashed_item.database,
+                    workspace=trashed_item.database.workspace,
             ).exists():
                 # Don't restore fields with their own trash entry as they have been
                 # separately deleted individually before the table was deleted.
@@ -102,15 +107,15 @@ class TableTrashableItemType(TrashableItemType):
         )
 
     def permanently_delete_item(
-        self,
-        trashed_item: Table,
-        trash_item_lookup_cache=None,
+            self,
+            trashed_item: Table,
+            trash_item_lookup_cache=None,
     ):
         """Deletes the table schema and instance."""
 
         if (
-            trash_item_lookup_cache is not None
-            and "row_table_model_cache" in trash_item_lookup_cache
+                trash_item_lookup_cache is not None
+                and "row_table_model_cache" in trash_item_lookup_cache
         ):
             # Invalidate the cached model for this table after it is deleted as
             # otherwise a row being deleted after will use the cached model and assume
@@ -132,10 +137,10 @@ class TableTrashableItemType(TrashableItemType):
 
     # noinspection PyMethodMayBeStatic
     def trash(
-        self,
-        item_to_trash: Table,
-        requesting_user: User,
-        trash_entry: TrashEntry,
+            self,
+            item_to_trash: Table,
+            requesting_user: User,
+            trash_entry: TrashEntry,
     ):
         table_to_trash = item_to_trash
         model = table_to_trash.get_model()
@@ -170,9 +175,9 @@ class TableTrashableItemType(TrashableItemType):
         related_fields_to_trash: List[int] = []
         for field in table_to_trash.linkrowfield_set.filter(trashed=False):
             if (
-                not field.trashed
-                and field.table_id is not table_to_trash.id
-                and not field.link_row_table_has_related_field
+                    not field.trashed
+                    and field.table_id is not table_to_trash.id
+                    and not field.link_row_table_has_related_field
             ):
                 handler.delete_field(
                     requesting_user,
@@ -209,15 +214,15 @@ class FieldTrashableItemType(TrashableItemType):
         FieldHandler().restore_field(trashed_item.specific)
 
     def permanently_delete_item(
-        self,
-        field: Field,
-        trash_item_lookup_cache=None,
+            self,
+            field: Field,
+            trash_item_lookup_cache=None,
     ):
         """Deletes the table schema and instance."""
 
         if (
-            trash_item_lookup_cache is not None
-            and "row_table_model_cache" in trash_item_lookup_cache
+                trash_item_lookup_cache is not None
+                and "row_table_model_cache" in trash_item_lookup_cache
         ):
             # Invalidate the cached model for this field's table as after this field is
             # deleted usage of the old model will cause ProgrammingError's as the column
@@ -262,7 +267,7 @@ class RowTrashableItemType(TrashableItemType):
         return True
 
     def get_parent(self, trashed_item: Any) -> Optional[Any]:
-        return self._get_table(trashed_item.baserow_table_id)
+        return self._get_table(trashed_item.baserow_dynamic_table_dynamic_table_dynamic_table_table_id)
 
     @staticmethod
     def _get_table(parent_id):
@@ -293,9 +298,9 @@ class RowTrashableItemType(TrashableItemType):
         updated_fields = [f["field"] for f in model._field_objects.values()]
         for field in updated_fields:
             for (
-                dependant_field,
-                dependant_field_type,
-                path_to_starting_table,
+                    dependant_field,
+                    dependant_field_type,
+                    path_to_starting_table,
             ) in field.dependant_fields_with_types(
                 field_cache, associated_relation_changed=True
             ):
@@ -324,7 +329,7 @@ class RowTrashableItemType(TrashableItemType):
         row.delete()
 
     def lookup_trashed_item(
-        self, trashed_entry: TrashEntry, trash_item_lookup_cache=None
+            self, trashed_entry: TrashEntry, trash_item_lookup_cache=None
     ):
         """
         Returns the actual instance of the trashed item. By default simply does a get
@@ -363,7 +368,7 @@ class RowTrashableItemType(TrashableItemType):
         return table.get_model()
 
     def get_restore_operation_type(self) -> str:
-        return RestoreDatabaseRowOperationType.type
+        return RestoreDatabaserow_dynamic_table_dynamic_table_dynamic_tableOperationType.type
 
     def get_restore_operation_context(self, trashed_entry, trashed_item) -> str:
         return self._get_table(trashed_entry.parent_trash_item_id)
@@ -423,9 +428,9 @@ class RowsTrashableItemType(TrashableItemType):
         updated_fields = [f["field"] for f in table_model._field_objects.values()]
         for field in updated_fields:
             for (
-                dependant_field,
-                dependant_field_type,
-                path_to_starting_table,
+                    dependant_field,
+                    dependant_field_type,
+                    path_to_starting_table,
             ) in field.dependant_fields_with_types(
                 field_cache, associated_relation_changed=True
             ):
@@ -470,7 +475,7 @@ class RowsTrashableItemType(TrashableItemType):
         trashed_item.delete()
 
     def lookup_trashed_item(
-        self, trashed_entry: TrashEntry, trash_item_lookup_cache=None
+            self, trashed_entry: TrashEntry, trash_item_lookup_cache=None
     ):
         try:
             return TrashedRows.objects.get(id=trashed_entry.trash_item_id)
@@ -482,7 +487,7 @@ class RowsTrashableItemType(TrashableItemType):
         return table.get_model()
 
     def get_restore_operation_type(self) -> str:
-        return RestoreDatabaseRowOperationType.type
+        return RestoreDatabaserow_dynamic_table_dynamic_table_dynamic_tableOperationType.type
 
     def get_restore_operation_context(self, trashed_entry, trashed_item) -> str:
         return trashed_item.table
@@ -497,7 +502,7 @@ class ViewTrashableItemType(TrashableItemType):
         return False
 
     def permanently_delete_item(
-        self, trashed_item: View, trash_item_lookup_cache: Dict[str, View] = None
+            self, trashed_item: View, trash_item_lookup_cache: Dict[str, View] = None
     ):
         ViewIndexingHandler.before_view_permanently_deleted(trashed_item)
         trashed_item.delete()

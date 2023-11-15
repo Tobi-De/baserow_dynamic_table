@@ -28,7 +28,7 @@ class BaserowDynamicTableConfig(AppConfig):
 
         def register_model(app_label, model):
             if not hasattr(model, "_generated_table_model") and not hasattr(
-                    model._meta.auto_created, "_generated_table_model"
+                model._meta.auto_created, "_generated_table_model"
             ):
                 original_register_model(app_label, model)
             else:
@@ -48,20 +48,16 @@ class BaserowDynamicTableConfig(AppConfig):
 
         from .fields.field_types import (
             BooleanFieldType,
-
             CreatedOnFieldType,
             DateFieldType,
             EmailFieldType,
-            FileFieldType,
-
+            LastModifiedFieldType,
             LinkRowFieldType,
             LongTextFieldType,
-
             MultipleSelectFieldType,
             NumberFieldType,
             PhoneNumberFieldType,
             RatingFieldType,
-
             SingleSelectFieldType,
             TextFieldType,
             URLFieldType,
@@ -78,16 +74,14 @@ class BaserowDynamicTableConfig(AppConfig):
 
         field_type_registry.register(CreatedOnFieldType())
         field_type_registry.register(LinkRowFieldType())
-        field_type_registry.register(FileFieldType())
+        field_type_registry.register(LastModifiedFieldType())
         field_type_registry.register(SingleSelectFieldType())
         field_type_registry.register(MultipleSelectFieldType())
         field_type_registry.register(PhoneNumberFieldType())
 
         from .fields.field_converters import (
             FileFieldConverter,
-
             LinkRowFieldConverter,
-
             MultipleSelectFieldToSingleSelectFieldConverter,
             MultipleSelectFieldToTextFieldConverter,
             SingleSelectFieldToMultipleSelectFieldConverter,
@@ -111,5 +105,6 @@ class BaserowDynamicTableConfig(AppConfig):
 # noinspection PyPep8Naming
 def clear_generated_model_cache_receiver(sender, **kwargs):
     clear_generated_model_cache()
+
 
 # noinspection PyPep8Naming

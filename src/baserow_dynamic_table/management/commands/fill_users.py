@@ -3,31 +3,31 @@ import sys
 import time
 import uuid
 
-from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
-from django.db import transaction
-
-from faker import Faker
-from tqdm import tqdm
-
-from baserow.core.models import (
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.models import (
     WORKSPACE_USER_PERMISSION_ADMIN,
     WORKSPACE_USER_PERMISSION_MEMBER,
     UserProfile,
     Workspace,
     WorkspaceUser,
 )
-from baserow.core.utils import grouper
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.utils import grouper
+from django.contrib.auth import get_user_model
+from django.core.management.base import BaseCommand
+from django.db import transaction
+from faker import Faker
+from tqdm import tqdm
 
 User = get_user_model()
 
-EMAIL_PREFIX = "baserow_prefix_to_ensure_we_never_accidentally_email_a_real_person_"
+EMAIL_PREFIX = (
+    "baserow_dynamic_table_dynamic_table_dynamic_table_prefix_to_ensure_we_never_accidentally_email_a_real_person_"
+)
 CLASHING_EMAIL_COUNTER = 0
 
 
 class Command(BaseCommand):
     help = (
-        "Fills baserow with random users. If no workspace is provided, a new one will be created, "
+        "Fills baserow_dynamic_table_dynamic_table_dynamic_table with random users. If no workspace is provided, a new one will be created, "
         "otherwise the users will be added to the workspace of the provided id."
     )
 
@@ -98,7 +98,7 @@ def crete_users(limit, workspace=None):
     batch_size = 100
 
     with tqdm(
-        total=limit, desc=f"Creating {limit} users in worker {os.getpid()}"
+            total=limit, desc=f"Creating {limit} users in worker {os.getpid()}"
     ) as pbar:
         for group in grouper(batch_size, range(limit)):
             users, users_profiles, workspaces, workspace_users = [], [], [], []

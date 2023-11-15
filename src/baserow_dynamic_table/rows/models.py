@@ -1,8 +1,11 @@
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.action.signals import (
+    ActionCommandType,
+)
+from baserow_dynamic_table_dynamic_table_dynamic_table.core.encoders import (
+    JSONEncoderSupportingDataClasses,
+)
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
-
-from baserow.core.action.signals import ActionCommandType
-from baserow.core.encoders import JSONEncoderSupportingDataClasses
 
 
 class RowHistory(models.Model):
@@ -16,7 +19,7 @@ class RowHistory(models.Model):
         help_text="The name of the user that performed the action.",
     )
     table = models.ForeignKey(
-        "database.Table",
+        "baserow_dynamic_table.Table",
         on_delete=models.CASCADE,
         help_text="The table that the row belongs to.",
     )

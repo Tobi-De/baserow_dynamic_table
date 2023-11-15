@@ -22,11 +22,13 @@ from django.db.utils import DatabaseError, DataError, ProgrammingError
 from loguru import logger
 from psycopg2 import sql
 
-from baserow_dynamic_table.core.constants import (
-    RESERVED_BASEROW_FIELD_NAMES,
-    UPSERT_OPTION_DICT_KEY,
-)
 from baserow_dynamic_table.core.db import specific_iterator
+from baserow_dynamic_table.core.utils import (
+    ChildProgressBuilder,
+    extract_allowed,
+    find_unused_name,
+    set_allowed_attrs,
+)
 from baserow_dynamic_table.db.schema import (
     lenient_schema_editor,
     safe_django_schema_editor,
@@ -35,15 +37,23 @@ from baserow_dynamic_table.db.sql_queries import (
     sql_create_try_cast,
     sql_drop_try_cast,
 )
+from baserow_dynamic_table.fields.constants import (
+    RESERVED_BASEROW_FIELD_NAMES,
+    UPSERT_OPTION_DICT_KEY,
+)
 from baserow_dynamic_table.fields.field_converters import (
     MultipleSelectConversionConfig,
 )
 from baserow_dynamic_table.fields.models import TextField
 from baserow_dynamic_table.table.models import Table
+from baserow_dynamic_table.trash.exceptions import RelatedTableTrashedException
+from baserow_dynamic_table.trash.handler import TrashHandler
+from baserow_dynamic_table.trash.models import TrashEntry
 from .dependencies.handler import FieldDependencyHandler
 from .dependencies.update_collector import FieldUpdateCollector
 from .exceptions import (
     CannotChangeFieldType,
+    CannotDeletePrimaryField,
     FailedToLockFieldDueToConflict,
     FieldDoesNotExist,
     FieldWithSameNameAlreadyExists,
@@ -58,15 +68,15 @@ from .exceptions import (
 from .field_cache import FieldCache
 from .models import Field, SelectOption, SpecificFieldForUpdate
 from .registries import field_converter_registry, field_type_registry
-from ..core.utils import extract_allowed, set_allowed_attrs, find_unused_name
+from ..search.handler import SearchHandler
 from ..table.cache import invalidate_table_in_model_cache
 
 
 def _validate_field_name(
-        field_values: Dict[str, Any],
-        table: Table,
-        existing_field: Optional[Field] = None,
-        raise_if_name_missing: bool = True,
+    field_values: Dict[str, Any],
+    table: Table,
+    existing_field: Optional[Field] = None,
+    raise_if_name_missing: bool = True,
 ):
     """
     Raises various exceptions if the provided field name is invalid.
@@ -75,10 +85,10 @@ def _validate_field_name(
     :param table: The table to check that this field name is valid for.
     :param existing_field: If this is name change for an existing field then the
         existing field instance must be provided here.
-    :param raise_if_name_missing: When True raises a InvalidBaserowFieldName if the
+    :param raise_if_name_missing: When True raises a Invalidbaserow_dynamic_tableFieldName if the
         name key is not in field_values. When False does not return and immediately
         returns if the key is missing.
-    :raises InvalidBaserowFieldName: If "name" is
+    :raises Invalidbaserow_dynamic_tableFieldName: If "name" is
     :raises MaxFieldNameLengthExceeded: When a provided field name is too long.
     :return:
     """
@@ -108,7 +118,7 @@ def _validate_field_name(
     if name in RESERVED_BASEROW_FIELD_NAMES:
         raise ReservedBaserowFieldNameException(
             f"A field named {name} cannot be created as it already exists as a "
-            f"reserved Baserow field name."
+            f"reserved baserow_dynamic_table field name."
         )
 
 
@@ -117,10 +127,10 @@ T = TypeVar("T", bound="Field")
 
 class FieldHandler:
     def get_field(
-            self,
-            field_id: int,
-            field_model: Optional[Type[T]] = None,
-            base_queryset: Optional[QuerySet] = None,
+        self,
+        field_id: int,
+        field_model: Optional[Type[T]] = None,
+        base_queryset: Optional[QuerySet] = None,
     ) -> T:
         """
         Selects a field with a given id from the database.
@@ -150,13 +160,16 @@ class FieldHandler:
         except Field.DoesNotExist:
             raise FieldDoesNotExist(f"The field with id {field_id} does not exist.")
 
+        if TrashHandler.item_has_a_trashed_parent(field.table, check_item_also=True):
+            raise FieldDoesNotExist(f"The field with id {field_id} does not exist.")
+
         return field
 
     def get_fields(
-            self,
-            table: Table,
-            base_queryset: Optional[QuerySet] = None,
-            specific: bool = True,
+        self,
+        table: Table,
+        base_queryset: Optional[QuerySet] = None,
+        specific: bool = True,
     ) -> Union[QuerySet[Field], Iterable[Field]]:
         """
         Gets all fields, optionally their specific subclass, of a given table.
@@ -174,9 +187,9 @@ class FieldHandler:
         return queryset
 
     def get_specific_field_for_update(
-            self,
-            field_id: int,
-            field_model: Optional[Type[T]] = None,
+        self,
+        field_id: int,
+        field_model: Optional[Type[T]] = None,
     ) -> SpecificFieldForUpdate:
         """
         Returns the .specific field which has been locked FOR UPDATE.
@@ -207,16 +220,16 @@ class FieldHandler:
         )
 
     def create_field(
-            self,
-            user: AbstractUser,
-            table: Table,
-            type_name: str,
-            primary=False,
-            skip_django_schema_editor_add_field=True,
-            return_updated_fields=False,
-            primary_key=None,
-            skip_search_updates=False,
-            **kwargs,
+        self,
+        user: AbstractUser,
+        table: Table,
+        type_name: str,
+        primary=False,
+        skip_django_schema_editor_add_field=True,
+        return_updated_fields=False,
+        primary_key=None,
+        skip_search_updates=False,
+        **kwargs,
     ) -> Union[Field, Tuple[Field, List[Field]]]:
         """
         Creates a new field with the given type for a table.
@@ -229,7 +242,7 @@ class FieldHandler:
             deleted and is a representation of the whole row.
         :param skip_django_schema_editor_add_field: Indicates whether the
             actual database schema change has to be made. You may want to do this
-            if you are making two Baserow fields which share the same m2m table. For
+            if you are making two baserow_dynamic_table fields which share the same m2m table. For
             the second field you create, you don't want to create the m2m table again.
         :param return_updated_fields: When True any other fields who changed as a
             result of this field creation are returned with their new field instances.
@@ -300,6 +313,8 @@ class FieldHandler:
             if skip_django_schema_editor_add_field:
                 schema_editor.add_field(to_model, model_field)
 
+            SearchHandler.after_field_created(instance, skip_search_updates)
+
         field_type.after_create(
             instance,
             to_model,
@@ -312,9 +327,9 @@ class FieldHandler:
         field_cache.cache_model_fields(to_model)
         update_collector = FieldUpdateCollector(table)
         for (
-                dependant_field,
-                dependant_field_type,
-                via_path_to_starting_table,
+            dependant_field,
+            dependant_field_type,
+            via_path_to_starting_table,
         ) in instance.dependant_fields_with_types(
             field_cache=field_cache, associated_relation_changed=True
         ):
@@ -330,24 +345,22 @@ class FieldHandler:
             field_cache, skip_search_updates
         )
 
-        update_collector.send_additional_field_updated_signals()
-
         if return_updated_fields:
             return instance, updated_fields
         else:
             return instance
 
     def update_field(
-            self,
-            user: AbstractUser,
-            field: SpecificFieldForUpdate,
-            new_type_name: Optional[str] = None,
-            return_updated_fields: bool = False,
-            postfix_to_fix_name_collisions: Optional[str] = None,
-            after_schema_change_callback: Optional[
-                Callable[[SpecificFieldForUpdate], None]
-            ] = None,
-            **kwargs,
+        self,
+        user: AbstractUser,
+        field: SpecificFieldForUpdate,
+        new_type_name: Optional[str] = None,
+        return_updated_fields: bool = False,
+        postfix_to_fix_name_collisions: Optional[str] = None,
+        after_schema_change_callback: Optional[
+            Callable[[SpecificFieldForUpdate], None]
+        ] = None,
+        **kwargs,
     ) -> Union[SpecificFieldForUpdate, Tuple[SpecificFieldForUpdate, List[Field]]]:
         """
         Updates the values and/or type of the given field.
@@ -394,9 +407,11 @@ class FieldHandler:
 
         # If the provided field type does not match with the current one we need to
         # migrate the field to the new type.
-        baserow_field_type_changed = from_field_type.type != to_field_type_name
+        baserow_dynamic_table_field_type_changed = (
+            from_field_type.type != to_field_type_name
+        )
         field_cache = FieldCache()
-        if baserow_field_type_changed:
+        if baserow_dynamic_table_field_type_changed:
             to_field_type = field_type_registry.get(to_field_type_name)
 
             if field.primary and not to_field_type.can_be_primary_field:
@@ -435,8 +450,9 @@ class FieldHandler:
         from_model_field = from_model._meta.get_field(field.db_column)
         to_model_field = to_model._meta.get_field(field.db_column)
 
-        # If the field type or the database representation changes it could be
-        # that some view dependencies like filters or sortings need to be changed.
+        SearchHandler.entire_field_values_changed_or_created(
+            field.table, updated_fields=[field]
+        )
 
         # Before a field is updated we are going to call the before_schema_change
         # method of the old field because some cleanup of related instances might
@@ -471,9 +487,9 @@ class FieldHandler:
                 connection,
             )
         else:
-            if baserow_field_type_changed:
-                # If the baserow type has changed we always want to force run any alter
-                # column SQL as otherwise it might not run if the two baserow fields
+            if baserow_dynamic_table_field_type_changed:
+                # If the baserow_dynamic_table type has changed we always want to force run any alter
+                # column SQL as otherwise it might not run if the two baserow_dynamic_table fields
                 # share the same underlying database column type.
                 force_alter_column = True
             else:
@@ -484,13 +500,13 @@ class FieldHandler:
             # If no field converter is found we are going to alter the field using the
             # the lenient schema editor.
             with lenient_schema_editor(
-                    from_field_type.get_alter_column_prepare_old_value(
-                        connection, old_field, field
-                    ),
-                    to_field_type.get_alter_column_prepare_new_value(
-                        connection, old_field, field
-                    ),
-                    force_alter_column,
+                from_field_type.get_alter_column_prepare_old_value(
+                    connection, old_field, field
+                ),
+                to_field_type.get_alter_column_prepare_new_value(
+                    connection, old_field, field
+                ),
+                force_alter_column,
             ) as schema_editor:
                 try:
                     schema_editor.alter_field(
@@ -515,8 +531,8 @@ class FieldHandler:
         # If the new field doesn't support select options we can delete those
         # relations.
         if (
-                from_field_type.can_have_select_options
-                and not to_field_type.can_have_select_options
+            from_field_type.can_have_select_options
+            and not to_field_type.can_have_select_options
         ):
             old_field.select_options.all().delete()
 
@@ -538,9 +554,9 @@ class FieldHandler:
         field_cache.cache_model_fields(to_model)
         update_collector = FieldUpdateCollector(field.table)
         for (
-                dependant_field,
-                dependant_field_type,
-                via_path_to_starting_table,
+            dependant_field,
+            dependant_field_type,
+            via_path_to_starting_table,
         ) in dependants_broken_due_to_type_change + field.dependant_fields_with_types(
             field_cache=field_cache, associated_relation_changed=True
         ):
@@ -557,18 +573,17 @@ class FieldHandler:
             field_cache
         )
 
-        update_collector.send_additional_field_updated_signals()
-
         if return_updated_fields:
             return field, updated_fields
         else:
             return field
 
     def duplicate_field(
-            self,
-            user: AbstractUser,
-            field: Field,
-            duplicate_data: bool = False,
+        self,
+        user: AbstractUser,
+        field: Field,
+        duplicate_data: bool = False,
+        progress_builder: Optional[ChildProgressBuilder] = None,
     ) -> Tuple[Field, List[Field]]:
         """
         Duplicates an existing field instance.
@@ -612,14 +627,15 @@ class FieldHandler:
         return new_field, updated_fields
 
     def delete_field(
-            self,
-            user: AbstractUser,
-            field: Field,
-            update_collector: Optional[FieldUpdateCollector] = None,
-            field_cache: Optional[FieldCache] = None,
-            apply_and_send_updates: Optional[bool] = True,
-            allow_deleting_primary: Optional[bool] = False,
-            immediately_delete_only_the_provided_field: Optional[bool] = False,
+        self,
+        user: AbstractUser,
+        field: Field,
+        existing_trash_entry: Optional[TrashEntry] = None,
+        update_collector: Optional[FieldUpdateCollector] = None,
+        field_cache: Optional[FieldCache] = None,
+        apply_and_send_updates: Optional[bool] = True,
+        allow_deleting_primary: Optional[bool] = False,
+        immediately_delete_only_the_provided_field: Optional[bool] = False,
     ) -> List[Field]:
         """
         Deletes an existing field if it is not a primary field.
@@ -652,7 +668,10 @@ class FieldHandler:
         if not isinstance(field, Field):
             raise ValueError("The field is not an instance of Field")
 
-        workspace = field.table.database.workspace
+        if field.primary and not allow_deleting_primary:
+            raise CannotDeletePrimaryField(
+                "Cannot delete the primary field of a table."
+            )
 
         field = field.specific
 
@@ -669,7 +688,13 @@ class FieldHandler:
 
         if immediately_delete_only_the_provided_field:
             field.delete()
-
+        else:
+            existing_trash_entry = TrashHandler.trash(
+                user,
+                field.table.database,
+                field,
+                existing_trash_entry=existing_trash_entry,
+            )
         # The trash call above might have just caused a massive field update to lots of
         # different fields. We need to reset our cache accordingly.
         field_cache.reset_cache()
@@ -677,9 +702,9 @@ class FieldHandler:
         FieldDependencyHandler.break_dependencies_delete_dependants(field)
 
         for (
-                dependant_field,
-                dependant_field_type,
-                via_path_to_starting_table,
+            dependant_field,
+            dependant_field_type,
+            via_path_to_starting_table,
         ) in dependant_fields:
             dependant_field_type.field_dependency_deleted(
                 dependant_field,
@@ -691,20 +716,15 @@ class FieldHandler:
 
         if not immediately_delete_only_the_provided_field:
             for (
-                    related_field
+                related_field
             ) in field_type.get_other_fields_to_trash_restore_always_together(field):
                 if not related_field.trashed:
                     FieldHandler().delete_field(
-                        user, related_field
+                        user, related_field, existing_trash_entry=existing_trash_entry
                     )
 
         if apply_and_send_updates:
-            updated_fields = update_collector.apply_updates_and_get_updated_fields(
-                field_cache
-            )
-
-            update_collector.send_additional_field_updated_signals()
-            return updated_fields
+            return update_collector.apply_updates_and_get_updated_fields(field_cache)
         else:
             return []
 
@@ -790,10 +810,10 @@ class FieldHandler:
 
     # noinspection PyMethodMayBeStatic
     def find_next_unused_field_name(
-            self,
-            table,
-            field_names_to_try: List[str],
-            field_ids_to_ignore: Optional[List[int]] = None,
+        self,
+        table,
+        field_names_to_try: List[str],
+        field_ids_to_ignore: Optional[List[int]] = None,
     ) -> str:
         """
         Finds a unused field name in the provided table. If no names in the provided
@@ -832,11 +852,11 @@ class FieldHandler:
         )
 
     def restore_field(
-            self,
-            field: Field,
-            update_collector: Optional[FieldUpdateCollector] = None,
-            field_cache: Optional[FieldCache] = None,
-            send_field_restored_signal: bool = True,
+        self,
+        field: Field,
+        update_collector: Optional[FieldUpdateCollector] = None,
+        field_cache: Optional[FieldCache] = None,
+        send_field_restored_signal: bool = True,
     ):
         """
         Restores the provided field from being in the trashed state.
@@ -881,9 +901,9 @@ class FieldHandler:
 
             FieldDependencyHandler.rebuild_dependencies(field, field_cache)
             for (
-                    dependant_field,
-                    dependant_field_type,
-                    via_path_to_starting_table,
+                dependant_field,
+                dependant_field_type,
+                via_path_to_starting_table,
             ) in field.dependant_fields_with_types(
                 field_cache, associated_relation_changed=True
             ):
@@ -894,19 +914,10 @@ class FieldHandler:
                     field_cache,
                     via_path_to_starting_table,
                 )
-            updated_fields = update_collector.apply_updates_and_get_updated_fields(
-                field_cache
-            )
-            ViewHandler().field_updated(updated_fields)
+            update_collector.apply_updates_and_get_updated_fields(field_cache)
             SearchHandler.entire_field_values_changed_or_created(
                 field.table, updated_fields=[field]
             )
-
-            if send_field_restored_signal:
-                field_restored.send(
-                    self, field=field, user=None, related_fields=updated_fields
-                )
-            update_collector.send_additional_field_updated_signals()
 
             for other_required_field in other_fields_that_must_restore_at_same_time:
                 if other_required_field.trashed:
@@ -916,9 +927,7 @@ class FieldHandler:
             # dependency appearing in the field dep graph. Allow the field type to
             # handle any errors which occur for such situations.
             exception_handled = field_type.restore_failed(field, e)
-            if exception_handled:
-                field_restored.send(self, field=field, user=None, related_fields=[])
-            else:
+            if not exception_handled:
                 raise e
 
     def move_field_between_tables(self, field_to_move, target_table):
@@ -950,7 +959,7 @@ class FieldHandler:
         SearchHandler.after_field_moved_between_tables(field_to_move, original_table_id)
 
     def get_unique_row_values(
-            self, field: Field, limit: int, split_comma_separated: bool = False
+        self, field: Field, limit: int, split_comma_separated: bool = False
     ) -> List[str]:
         """
         Returns a list of all the unique row values for a field, sorted in order of
@@ -998,7 +1007,7 @@ class FieldHandler:
                 sql_create_try_cast
                 % {
                     "alter_column_prepare_old_value": alter_column_prepare_old_value
-                                                      or "",
+                    or "",
                     "alter_column_prepare_new_value": "",
                     "type": "text",
                 },
@@ -1068,10 +1077,10 @@ class FieldHandler:
         return [x[0] for x in res]
 
     def _validate_name_and_optionally_rename_if_collision(
-            self,
-            field: Field,
-            field_values: Dict[str, Any],
-            postfix_for_name_collisions: Optional[str],
+        self,
+        field: Field,
+        field_values: Dict[str, Any],
+        postfix_for_name_collisions: Optional[str],
     ):
         """
         Validates the name of the field raising an exception if it is invalid. If the
