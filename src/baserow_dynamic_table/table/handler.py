@@ -46,7 +46,7 @@ TableForUpdate = NewType("TableForUpdate", Table)
 
 class TableHandler:
     def get_table(
-            self, table_id: int, base_queryset: Optional[QuerySet] = None
+        self, table_id: int, base_queryset: Optional[QuerySet] = None
     ) -> Table:
         """
         Selects a table with a given id from the database.
@@ -72,7 +72,7 @@ class TableHandler:
         return table
 
     def get_table_for_update(
-            self, table_id: int, nowait: bool = False
+        self, table_id: int, nowait: bool = False
     ) -> TableForUpdate:
         """
         Provide a type hint for tables that need to be updated.
@@ -111,13 +111,13 @@ class TableHandler:
         return [table.id for table in Table.objects.order_by("order")]
 
     def create_table(
-            self,
-            user: AbstractUser,
-            name: str,
-            data: Optional[List[List[Any]]] = None,
-            first_row_header: bool = True,
-            fill_example: bool = False,
-            progress: Optional[Progress] = None,
+        self,
+        user: AbstractUser,
+        name: str,
+        data: Optional[List[List[Any]]] = None,
+        first_row_header: bool = True,
+        fill_example: bool = False,
+        progress: Optional[Progress] = None,
     ):
         """
         Creates a new table from optionally provided data. If no data is specified,
@@ -146,7 +146,6 @@ class TableHandler:
                 data, first_row_header=first_row_header
             )
         else:
-
             if fill_example:
                 fields, data = self.get_example_table_field_and_data()
             else:
@@ -161,10 +160,10 @@ class TableHandler:
         return table, error_report
 
     def create_table_and_fields(
-            self,
-            user: AbstractUser,
-            name: str,
-            fields: List[Tuple[str, str, Dict[str, Any]]],
+        self,
+        user: AbstractUser,
+        name: str,
+        fields: List[Tuple[str, str, Dict[str, Any]]],
     ) -> Table:
         """
         Creates a new table with the specified fields. Also creates a default grid view
@@ -214,7 +213,7 @@ class TableHandler:
         return table
 
     def normalize_initial_table_data(
-            self, data: List[List[Any]], first_row_header: bool
+        self, data: List[List[Any]], first_row_header: bool
     ) -> Tuple[List, List]:
         """
         Normalizes the provided initial table data. The amount of columns will be made
@@ -227,7 +226,7 @@ class TableHandler:
         :raises MaxFieldNameLengthExceeded: When the provided name is too long.
         :raises InitialTableDataDuplicateName: When duplicates exit in field names.
         :raises ReservedBaserowFieldNameException: When the field name is reserved by
-            baserow_dynamic_table.
+            baserow.
         :raises InvalidBaserowFieldName: When the field name is invalid (empty).
         :return: A list containing the field names with a type and a list containing all
             the rows.
@@ -272,10 +271,7 @@ class TableHandler:
         if len(long_field_names) > 0:
             raise MaxFieldNameLengthExceeded(max_field_name_length)
 
-        if (
-                len(field_name_set.intersection(RESERVED_BASEROW_FIELD_NAMES))
-                > 0
-        ):
+        if len(field_name_set.intersection(RESERVED_BASEROW_FIELD_NAMES)) > 0:
             raise ReservedBaserowFieldNameException()
 
         if "" in field_name_set:
@@ -380,7 +376,7 @@ class TableHandler:
         return find_unused_name([proposed_name], existing_tables_names, max_length=255)
 
     def _create_related_link_fields_in_existing_tables_to_import(
-            self, serialized_table: Dict[str, Any], id_mapping: Dict[str, Any]
+        self, serialized_table: Dict[str, Any], id_mapping: Dict[str, Any]
     ) -> List[Tuple[Table, Dict[str, Any]]]:
         """
         Creates extra serialized field dicts to pass to the table importer so it will
@@ -474,7 +470,7 @@ class TableHandler:
         time = timezone.now()
         i = 0
         for table in Table.objects.filter(
-                database__workspace__template__isnull=True
+            database__workspace__template__isnull=True
         ).iterator(chunk_size=chunk_size):
             try:
                 count = table.get_model(field_ids=[]).objects.count()
@@ -513,10 +509,10 @@ class TableHandler:
         """
 
         return (
-                Table.objects.filter(database__workspace_id=workspace_id).aggregate(
-                    Sum("row_count")
-                )["row_count__sum"]
-                or 0
+            Table.objects.filter(database__workspace_id=workspace_id).aggregate(
+                Sum("row_count")
+            )["row_count__sum"]
+            or 0
         )
 
     def create_needs_background_update_field(self, table: "Table") -> None:

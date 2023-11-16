@@ -16,9 +16,9 @@ class FieldCache:
     """
 
     def __init__(
-            self,
-            existing_cache: Optional["FieldCache"] = None,
-            existing_model: Optional[Type[Model]] = None,
+        self,
+        existing_cache: Optional["FieldCache"] = None,
+        existing_model: Optional[Type[Model]] = None,
     ):
         if existing_cache is not None:
             self._cached_field_by_name_per_table = (
@@ -34,7 +34,7 @@ class FieldCache:
 
     # noinspection PyUnresolvedReferences,PyProtectedMember
     def cache_model(self, model: Type[Model]):
-        self._model_cache[model.baserow_dynamic_table_dynamic_table_dynamic_table_table_id] = model
+        self._model_cache[model.baserow_table_id] = model
         self.cache_model_fields(model)
 
     # noinspection PyUnresolvedReferences,PyProtectedMember
